@@ -1,0 +1,122 @@
+datasource db {
+  provider = "sqlite" // switch to "postgresql" + a Postgres DATABASE_URL for prod; nothing else here needs to change
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Org {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  users     User[]
+}
+
+model User {
+  id           String      @id @default(cuid())
+  name         String
+  email        String      @unique
+  passwordHash String
+  orgId        String
+  org          Org         @relation(fields: [orgId], references: [id])
+  createdAt    DateTime    @default(now())
+  quizzes      Quiz[]
+  attempts     Attempt[]
+  streak       Streak?
+  badges       UserBadge[]
+}
+
+model Topic {
+  id      String  @id @default(cuid())
+  name    String  @unique
+  tags    Tag[]   @relation("TopicTags")
+  quizzes Quiz[]
+}
+
+model Tag {
+  id     String  @id @default(cuid())
+  name   String  @unique
+  topics Topic[] @relation("TopicTags")
+}
+
+model Quiz {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  topicId      String
+  topic        Topic      @relation(fields: [topicId], references: [id])
+  difficulty   String // beginner | intermediate | advanced -- see src/constants/enums.js
+  providerUsed String
+  sourceNotes  String?
+  createdAt    DateTime   @default(now())
+  questions    Question[]
+  attempts     Attempt[]
+}
+
+model Question {
+  id            String      @id @default(cuid())
+  quizId        String
+  quiz          Quiz        @relation(fields: [quizId], references: [id])
+  type          String // mcq | code_completion | debug | short_answer | ordering | true_false
+  prompt        String
+  optionsJson   String? // JSON.stringify(string[]) -- mcq/true_false only
+  starterCode   String?
+  correctAnswer String // JSON.stringify(string | string[])
+  explanation   String
+  orderIndex    Int
+  answerLogs    AnswerLog[]
+}
+
+model Attempt {
+  id               String     @id @default(cuid())
+  quizId           String
+  quiz             Quiz       @relation(fields: [quizId], references: [id])
+  userId           String
+  user             User       @relation(fields: [userId], references: [id])
+  startedAt        DateTime   @default(now())
+  completedAt      DateTime?
+  score            Float? // mean of AnswerLog.scoreFraction, null until submitted
+  timeSpentSeconds Int?
+  answerLogs       AnswerLog[]
+}
+
+model AnswerLog {
+  id            String   @id @default(cuid())
+  attemptId     String
+  attempt       Attempt  @relation(fields: [attemptId], references: [id])
+  questionId    String
+  question      Question @relation(fields: [questionId], references: [id])
+  userAnswer    String // JSON.stringify(string | string[])
+  isCorrect     Boolean
+  scoreFraction Float // 1/0 for auto-graded types, partial credit for short_answer
+  aiFeedback    String?
+}
+
+model Streak {
+  userId         String   @id
+  user           User     @relation(fields: [userId], references: [id])
+  currentStreak  Int      @default(0)
+  longestStreak  Int      @default(0)
+  lastActiveDate String? // "YYYY-MM-DD", UTC
+}
+
+model Badge {
+  id          String      @id @default(cuid())
+  name        String
+  description String
+  ruleJson    String // JSON.stringify(rule) -- tagged union, see src/services/badgeService.js
+  userBadges  UserBadge[]
+}
+
+model UserBadge {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id])
+  badgeId  String
+  badge    Badge    @relation(fields: [badgeId], references: [id])
+  earnedAt DateTime @default(now())
+
+  @@unique([userId, badgeId])
+}
