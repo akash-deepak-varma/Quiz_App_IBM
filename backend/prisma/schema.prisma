@@ -53,6 +53,9 @@ model Quiz {
   createdAt    DateTime   @default(now())
   questions    Question[]
   attempts     Attempt[]
+
+  @@index([userId])
+  @@index([topicId])
 }
 
 model Question {
@@ -67,6 +70,8 @@ model Question {
   explanation   String
   orderIndex    Int
   answerLogs    AnswerLog[]
+
+  @@index([quizId])
 }
 
 model Attempt {
@@ -78,8 +83,13 @@ model Attempt {
   startedAt        DateTime   @default(now())
   completedAt      DateTime?
   score            Float? // mean of AnswerLog.scoreFraction, null until submitted
+  xp               Float      @default(0) // computeAttemptXP(...) at submit-time -- see leaderboardService.js
   timeSpentSeconds Int?
   answerLogs       AnswerLog[]
+
+  @@index([userId])
+  @@index([quizId])
+  @@index([completedAt])
 }
 
 model AnswerLog {
@@ -92,6 +102,9 @@ model AnswerLog {
   isCorrect     Boolean
   scoreFraction Float // 1/0 for auto-graded types, partial credit for short_answer
   aiFeedback    String?
+
+  @@index([attemptId])
+  @@index([questionId])
 }
 
 model Streak {
@@ -118,5 +131,6 @@ model UserBadge {
   badge    Badge    @relation(fields: [badgeId], references: [id])
   earnedAt DateTime @default(now())
 
-  @@unique([userId, badgeId])
+  @@unique([userId, badgeId]) // also covers userId lookups as the composite's leading column
+  @@index([badgeId])
 }

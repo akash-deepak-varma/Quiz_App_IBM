@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { apiFetch } from '../api/client.js';
 import AttemptResultsList from '../components/AttemptResultsList.jsx';
+import { LoadingIndicator, PageError } from '../components/AsyncState.jsx';
 
 export default function ResultsPage() {
   const location = useLocation();
@@ -22,8 +23,8 @@ export default function ResultsPage() {
       .finally(() => setLoading(false));
   }, [attemptId, result]);
 
-  if (loading) return <p className="p-6 text-slate-500">Loading results...</p>;
-  if (error) return <p className="p-6 text-red-600">{error}</p>;
+  if (loading) return <LoadingIndicator label="Loading results..." fullPage />;
+  if (error) return <PageError message={error} />;
   if (!result) return null;
 
   return (
@@ -54,7 +55,7 @@ export default function ResultsPage() {
         )}
       </div>
 
-      <AttemptResultsList results={result.results} />
+      <AttemptResultsList results={result.results} attemptId={attemptId} />
 
       <Link to="/" className="inline-block rounded bg-slate-800 px-4 py-2 text-white hover:bg-slate-700">
         Generate another quiz

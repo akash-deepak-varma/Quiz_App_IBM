@@ -10,7 +10,9 @@
     "test:watch": "vitest",
     "prisma:migrate": "prisma migrate dev",
     "prisma:generate": "prisma generate",
-    "seed": "node prisma/seed.js"
+    "seed": "node prisma/seed.js",
+    "lint": "eslint .",
+    "format": "prettier --write ."
   },
   "prisma": {
     "seed": "node prisma/seed.js"
@@ -27,7 +29,13 @@
     "openai": "^4.71.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.6",
     "prisma": "^5.22.0",
+    "supertest": "^7.2.2",
     "vitest": "^2.1.4"
   },
   "allowScripts": {

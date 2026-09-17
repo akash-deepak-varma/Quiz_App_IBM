@@ -1,4 +1,4 @@
-export function errorHandler(err, req, res, next) {
+export function errorHandler(err, req, res, _next) {
   const statusCode = err.statusCode || 500;
 
   if (statusCode >= 500) {

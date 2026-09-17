@@ -26,7 +26,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-[80vh] items-center justify-center p-4">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4 rounded-lg bg-white p-8 shadow">
+      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4 rounded-lg bg-white p-4 shadow sm:p-8">
         <h1 className="text-2xl font-semibold text-slate-800">Log in</h1>
         {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
         <div>
@@ -36,7 +36,7 @@ export default function LoginPage() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
           />
         </div>
         <div>
@@ -46,7 +46,7 @@ export default function LoginPage() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
           />
         </div>
         <button

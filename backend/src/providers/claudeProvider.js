@@ -5,14 +5,22 @@ import {
   buildQuizGenerationPrompt,
   buildGradeShortAnswerPrompt,
   buildGradeCodePrompt,
+  buildExplainMistakePrompt,
 } from './promptUtils.js';
 
-const MAX_TOKENS = 4096;
+// Richer explanations plus up to MAX_QUESTIONS (20) questions can exceed a smaller cap and
+// truncate the JSON response, so this is sized generously rather than tightly.
+const MAX_TOKENS = 8192;
 
 function getClient() {
   // ICA's gateway expects Bearer-token auth -- `authToken` sends `Authorization: Bearer <key>`,
   // unlike the SDK's default `apiKey` option which signs requests differently.
-  return new Anthropic({ baseURL: env.anthropic.baseURL, authToken: env.anthropic.apiKey });
+  return new Anthropic({
+    baseURL: env.anthropic.baseURL,
+    authToken: env.anthropic.apiKey,
+    timeout: env.aiProviderTimeoutMs,
+    maxRetries: env.aiProviderMaxRetries,
+  });
 }
 
 async function complete(system, user) {
@@ -43,5 +51,10 @@ export async function gradeShortAnswer(params) {
 
 export async function gradeCode(params) {
   const { system, user } = buildGradeCodePrompt(params);
+  return extractJsonFromText(await complete(system, user));
+}
+
+export async function explainMistake(params) {
+  const { system, user } = buildExplainMistakePrompt(params);
   return extractJsonFromText(await complete(system, user));
 }

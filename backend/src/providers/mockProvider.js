@@ -110,3 +110,18 @@ export async function gradeCode() {
       "[Mock] This differs from the reference solution beyond comments/whitespace. Mock grading can't verify alternative-but-correct code -- configure a real AI provider (claude/openai) for semantic grading.",
   };
 }
+
+function formatAnswerForMock(answer) {
+  if (answer === null || answer === undefined) return '(no answer given)';
+  if (Array.isArray(answer)) return answer.join(' -> ');
+  return String(answer);
+}
+
+export async function explainMistake({ correctAnswer, userAnswer }) {
+  return {
+    explanation:
+      `[Mock] You answered "${formatAnswerForMock(userAnswer)}", but the correct answer is ` +
+      `"${formatAnswerForMock(correctAnswer)}". Configure a real AI provider (claude/openai) for ` +
+      'a personalized explanation of this mistake.',
+  };
+}

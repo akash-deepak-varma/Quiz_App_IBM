@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api/client.js';
+import { ErrorBanner } from '../components/AsyncState.jsx';
 
 const DIFFICULTIES = ['beginner', 'intermediate', 'advanced'];
 const QUESTION_TYPES = ['mcq', 'code_completion', 'debug', 'short_answer', 'ordering', 'true_false'];
@@ -17,6 +18,10 @@ const TYPE_LABELS = {
 
 export default function GenerateQuizPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  // Read once on mount -- a subsequent client-side re-render of this same page (e.g. after
+  // a failed submit) shouldn't keep re-showing a notice from an earlier navigation.
+  const [notice] = useState(location.state?.notice ?? null);
   const [topic, setTopic] = useState('');
   const [notes, setNotes] = useState('');
   const [difficulty, setDifficulty] = useState('beginner');
@@ -57,7 +62,8 @@ export default function GenerateQuizPage() {
     <div className="mx-auto max-w-2xl p-4 sm:p-6">
       <form onSubmit={handleSubmit} className="space-y-5 rounded-lg bg-white p-5 shadow sm:p-8">
         <h1 className="text-2xl font-semibold text-slate-800">Generate a quiz</h1>
-        {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+        {notice && <ErrorBanner message={notice} />}
+        {error && <ErrorBanner message={error} />}
 
         <div>
           <label className="block text-sm font-medium text-slate-700">Topic</label>
@@ -67,7 +73,7 @@ export default function GenerateQuizPage() {
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
             placeholder="e.g. JavaScript closures"
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
           />
         </div>
 
@@ -78,7 +84,7 @@ export default function GenerateQuizPage() {
             onChange={(e) => setNotes(e.target.value)}
             rows={4}
             placeholder="Paste any notes you'd like the quiz based on..."
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
           />
         </div>
 
@@ -88,7 +94,7 @@ export default function GenerateQuizPage() {
             <select
               value={difficulty}
               onChange={(e) => setDifficulty(e.target.value)}
-              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
             >
               {DIFFICULTIES.map((d) => (
                 <option key={d} value={d}>
@@ -105,7 +111,7 @@ export default function GenerateQuizPage() {
               max={20}
               value={numQuestions}
               onChange={(e) => setNumQuestions(e.target.value)}
-              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
             />
           </div>
         </div>
@@ -129,7 +135,7 @@ export default function GenerateQuizPage() {
           <select
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
           >
             {PROVIDERS.map((p) => (
               <option key={p} value={p}>

@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prismaClient.js';
 import { fromJsonOrNull } from '../lib/serialization.js';
-import { NotFoundError } from '../lib/errors.js';
+import { NotFoundError, BadRequestError } from '../lib/errors.js';
+import { getProvider } from '../providers/index.js';
 
 export async function getAttempt(req, res, next) {
   try {
@@ -25,6 +26,39 @@ export async function getAttempt(req, res, next) {
         aiFeedback: log.aiFeedback,
       })),
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function explainMistake(req, res, next) {
+  try {
+    const { id, questionId } = req.params;
+
+    const answerLog = await prisma.answerLog.findFirst({
+      where: { attemptId: id, questionId },
+      include: { question: true, attempt: { include: { quiz: true } } },
+    });
+    if (!answerLog || answerLog.attempt.userId !== req.user.id) {
+      throw new NotFoundError('Answer not found');
+    }
+    if (answerLog.isCorrect) {
+      throw new BadRequestError('This question was answered correctly -- nothing to explain');
+    }
+
+    const { question, attempt } = answerLog;
+    const provider = getProvider(attempt.quiz.providerUsed);
+    const { explanation } = await provider.explainMistake({
+      type: question.type,
+      prompt: question.prompt,
+      options: fromJsonOrNull(question.optionsJson),
+      starterCode: question.starterCode,
+      correctAnswer: fromJsonOrNull(question.correctAnswer),
+      explanation: question.explanation,
+      userAnswer: fromJsonOrNull(answerLog.userAnswer),
+    });
+
+    res.json({ explanation });
   } catch (err) {
     next(err);
   }

@@ -3,6 +3,7 @@ import { apiFetch } from '../api/client.js';
 import AccuracyTrendChart from '../components/charts/AccuracyTrendChart.jsx';
 import TopicAccuracyChart from '../components/charts/TopicAccuracyChart.jsx';
 import AttemptResultsList from '../components/AttemptResultsList.jsx';
+import { LoadingIndicator, PageError } from '../components/AsyncState.jsx';
 
 function StatCard({ label, value }) {
   return (
@@ -55,8 +56,8 @@ export default function DashboardPage() {
     }
   };
 
-  if (error) return <p className="p-6 text-red-600">{error}</p>;
-  if (!summary || !history) return <p className="p-6 text-slate-500">Loading dashboard...</p>;
+  if (error) return <PageError message={error} />;
+  if (!summary || !history) return <LoadingIndicator label="Loading dashboard..." fullPage />;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
@@ -116,9 +117,11 @@ export default function DashboardPage() {
                 {selectedAttemptId === a.attemptId && (
                   <div className="border-t border-slate-100 py-3">
                     {detailLoading ? (
-                      <p className="text-sm text-slate-400">Loading...</p>
+                      <LoadingIndicator />
                     ) : (
-                      selectedAttempt && <AttemptResultsList results={selectedAttempt.results} />
+                      selectedAttempt && (
+                        <AttemptResultsList results={selectedAttempt.results} attemptId={selectedAttemptId} />
+                      )
                     )}
                   </div>
                 )}

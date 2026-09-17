@@ -12,3 +12,12 @@ export const quizGenerateRateLimit = rateLimit({
   keyGenerator: (req) => req.user?.id || req.ip,
   message: { error: { message: 'Quiz generation limit reached. Please try again later.' } },
 });
+
+export const explainMistakeRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: env.explainRateLimit,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: { message: 'Explanation request limit reached. Please try again later.' } },
+});

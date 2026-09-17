@@ -4,6 +4,7 @@ import { getProvider } from '../providers/index.js';
 import { scoreAnswer, computeAttemptScore } from '../services/quizScoringService.js';
 import { recordActivityAndGetStreak } from '../services/streakService.js';
 import { evaluateAndAwardBadges } from '../services/badgeService.js';
+import { computeAttemptXP } from '../services/leaderboardService.js';
 import { toJsonOrNull, fromJsonOrNull } from '../lib/serialization.js';
 import { BadRequestError, NotFoundError } from '../lib/errors.js';
 import { DIFFICULTIES, QUESTION_TYPES, AI_PROVIDERS, MIN_QUESTIONS, MAX_QUESTIONS } from '../constants/enums.js';
@@ -136,13 +137,15 @@ export async function submit(req, res, next) {
     }
 
     const parsedTimeSpent = Number(timeSpentSeconds);
+    const attemptScore = computeAttemptScore(graded.map((g) => g.scoreFraction));
 
     const attempt = await prisma.attempt.create({
       data: {
         quizId: quiz.id,
         userId: req.user.id,
         completedAt: new Date(),
-        score: computeAttemptScore(graded.map((g) => g.scoreFraction)),
+        score: attemptScore,
+        xp: computeAttemptXP({ difficulty: quiz.difficulty, numQuestions: graded.length, accuracy: attemptScore }),
         timeSpentSeconds: Number.isFinite(parsedTimeSpent) ? parsedTimeSpent : null,
         answerLogs: {
           create: graded.map((g) => ({

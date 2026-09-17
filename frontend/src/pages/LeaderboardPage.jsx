@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import LeaderboardTable from '../components/LeaderboardTable.jsx';
+import { LoadingIndicator, ErrorBanner } from '../components/AsyncState.jsx';
 
 const RANGES = [
   { value: 'week', label: 'This week' },
@@ -40,11 +41,11 @@ export default function LeaderboardPage() {
         ))}
       </div>
 
-      {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+      {error && <ErrorBanner message={error} />}
 
       <div className="rounded-lg bg-white p-4 shadow">
         {rows === null ? (
-          <p className="text-sm text-slate-400">Loading...</p>
+          <LoadingIndicator />
         ) : (
           <LeaderboardTable rows={rows} currentUserId={user?.id} />
         )}

@@ -38,12 +38,29 @@
  */
 
 /**
+ * @typedef {Object} ExplainMistakeParams
+ * @property {string} type
+ * @property {string} prompt
+ * @property {string[]|null} [options]
+ * @property {string|null} [starterCode]
+ * @property {string|string[]} correctAnswer
+ * @property {string} explanation
+ * @property {*} userAnswer
+ */
+
+/**
+ * @typedef {Object} MistakeExplanation
+ * @property {string} explanation
+ */
+
+/**
  * Every AI provider module must export all of these:
  *   generateQuiz(params: GenerateQuizParams) => Promise<object>   raw, unvalidated quiz JSON
  *   gradeShortAnswer(params: GradeShortAnswerParams) => Promise<ShortAnswerGrade>
  *   gradeCode(params: GradeCodeParams) => Promise<CodeGrade>
+ *   explainMistake(params: ExplainMistakeParams) => Promise<MistakeExplanation>
  *
  * Providers only call the model and return/throw -- schema validation and retry
  * happen one layer up, in services/quizGenerationService.js.
  */
-export const REQUIRED_PROVIDER_METHODS = ['generateQuiz', 'gradeShortAnswer', 'gradeCode'];
+export const REQUIRED_PROVIDER_METHODS = ['generateQuiz', 'gradeShortAnswer', 'gradeCode', 'explainMistake'];

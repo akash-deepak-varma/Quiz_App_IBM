@@ -21,31 +21,71 @@ export function extractJsonFromText(text) {
   return JSON.parse(candidate.slice(start, end + 1));
 }
 
+// Formatting instruction shared by generation and the mistake-explanation prompt so LaTeX
+// written by either path actually renders (see frontend/src/components/MathText.jsx).
+const MATH_FORMATTING_RULE =
+  'When a topic involves mathematical notation, write it as LaTeX using $...$ for inline math ' +
+  'and $$...$$ for standalone equations -- the app renders this notation, so prefer it over ' +
+  'ASCII math (x^2, sqrt(x)) or spelled-out symbols.';
+
 const TYPE_RULES = `
 Question type rules:
-- "mcq": options = 3-5 answer strings; correctAnswer = exactly one of those strings. Always single-select -- never an array, the UI has no way to indicate multi-select to the learner.
-- "true_false": options = ["true", "false"]; correctAnswer = "true" or "false" (lowercase).
-- "ordering": options = the steps/items in SHUFFLED order; correctAnswer = the same strings in the correct order (a permutation of options).
-- "short_answer": options = null, starterCode = null; correctAnswer = a short reference answer (graded by rubric, not exact match).
+- "mcq": options = 3-5 answer strings; correctAnswer = exactly one of those strings. Always single-select -- never an array, the UI has no way to indicate multi-select to the learner. Wrong options (distractors) should be plausible -- each one should reflect a real misconception, not an obviously-silly choice.
+- "true_false": options = ["true", "false"]; correctAnswer = "true" or "false" (lowercase). Avoid trivially-worded statements; the statement should require actually understanding the concept, not just spotting an extreme word like "always"/"never".
+- "ordering": options = the steps/items in SHUFFLED order; correctAnswer = the same strings in the correct order (a permutation of options). The steps should test understanding of a process or sequence, not arbitrary list order.
+- "short_answer": options = null, starterCode = null; correctAnswer = a short reference answer (graded by rubric, not exact match). Ask for an explanation or reasoning, not a one-word fact lookup.
 - "code_completion": options = null; starterCode = a snippet with a gap for the learner to fill in; correctAnswer = the FULL corrected code (the whole function, not just the missing piece) -- it is compared against the learner's entire submitted code.
-- "debug": options = null; starterCode = a snippet containing a deliberate bug; correctAnswer = the FULL fixed code (the whole function) -- compared against the learner's entire submitted code.
+- "debug": options = null; starterCode = a snippet containing a deliberate bug; correctAnswer = the FULL fixed code (the whole function) -- compared against the learner's entire submitted code. The bug should stem from a common, realistic misconception, not a typo.
 Every question needs a non-empty "explanation" string.
+`.trim();
+
+const PEDAGOGY_RULES = `
+Pedagogy rules -- the goal is for the learner to understand the concept, not just recall a fact:
+- Prefer questions that require applying, comparing, or reasoning about a concept over questions that only ask "what is the definition of X".
+- Where the concept has a common misconception or a subtle "gotcha", design at least some questions around it -- that is where real understanding is built.
+- Vary the cognitive level across the quiz: mix straightforward recall with "why does this happen", "what would this produce", and "which approach is better and why" style questions.
+- Distribute the requested question types roughly evenly rather than clustering the same type together.
+`.trim();
+
+const DIFFICULTY_RULES = `
+Difficulty calibration:
+- "beginner": foundational, single-concept questions; distractors are clearly different ideas, not near-misses.
+- "intermediate": combines two related concepts, or requires tracing through a short piece of logic/code; distractors reflect plausible partial understanding.
+- "advanced": edge cases, performance/design trade-offs, or subtle bugs; distractors reflect real, specific misconceptions an experienced learner could still fall for.
+`.trim();
+
+const QUESTION_QUALITY_RULES = `
+Explanation quality rules -- "explanation" must teach, not just confirm the answer:
+- State WHY the correct answer is correct, not only that it is.
+- For mcq/true_false, briefly note why the most tempting wrong option is wrong (name the misconception it reflects).
+- End with one short, concrete takeaway the learner can remember and reuse.
+- Keep it focused: 2-4 sentences is usually enough -- depth, not length, is the goal.
 `.trim();
 
 export function buildQuizGenerationPrompt({ topic, notes, difficulty, numQuestions, typeMix }) {
   const types = Array.isArray(typeMix) && typeMix.length > 0 ? typeMix : QUESTION_TYPES;
 
   const system = [
-    'You are a quiz-generation engine for a developer learning app.',
+    'You are a quiz-generation engine for a developer learning app. Your goal is to help the ' +
+      'learner genuinely understand the topic, not just test recall of facts.',
     'Respond with ONLY a single valid JSON object. No markdown code fences, no commentary before or after, no trailing commas.',
     TYPE_RULES,
+    PEDAGOGY_RULES,
+    DIFFICULTY_RULES,
+    QUESTION_QUALITY_RULES,
+    MATH_FORMATTING_RULE,
   ].join('\n\n');
 
   const user = [
     `Generate exactly ${numQuestions} quiz question(s) about: "${topic}".`,
     `Difficulty: ${difficulty}.`,
     `Use only these question types, cycling through them as needed: ${types.join(', ')}.`,
-    notes ? `Base the questions on these learner notes where relevant:\n${notes}` : null,
+    notes
+      ? `The learner provided these notes. Use them to infer the concepts they're studying and ` +
+        `write questions that test understanding of those concepts -- do NOT just turn ` +
+        `individual sentences from the notes into direct recall questions:\n${notes}`
+      : null,
+    'Every question should require some reasoning, however small -- avoid pure lookup/definition questions when a deeper version is possible.',
     '',
     'Respond with exactly this JSON shape:',
     JSON.stringify(
@@ -112,6 +152,48 @@ export function buildGradeCodePrompt({ prompt, starterCode, correctAnswer, userA
     `Learner's submitted code:\n${userAnswer}`,
     '',
     "Decide whether the learner's code correctly solves the stated problem, even if it differs stylistically from the reference solution.",
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return { system, user };
+}
+
+function formatAnswerForPrompt(answer) {
+  if (answer === null || answer === undefined) return '(no answer given)';
+  if (Array.isArray(answer)) return answer.join(' -> ');
+  return String(answer);
+}
+
+// Personalized mistake-explanation prompt (Part 2) -- distinct from buildGrade*Prompt above:
+// those score/grade an answer, this one explains a wrong answer that has already been graded.
+export function buildExplainMistakePrompt({
+  type,
+  prompt,
+  options,
+  starterCode,
+  correctAnswer,
+  explanation,
+  userAnswer,
+}) {
+  const system = [
+    'You are a patient, encouraging tutor for a developer learning app, helping a learner ' +
+      'understand a quiz question they answered incorrectly.',
+    'Respond with ONLY a single valid JSON object: {"explanation": "string"}. No markdown code fences, no commentary before or after.',
+    'In the explanation: (1) name the specific misconception likely behind THIS answer (not a generic wrong-answer explanation), (2) contrast it with the correct reasoning, (3) end with one concrete, memorable takeaway. Keep it focused -- a short paragraph, not an essay.',
+    MATH_FORMATTING_RULE,
+  ].join('\n');
+
+  const user = [
+    `Question type: ${type}`,
+    `Question: ${prompt}`,
+    options ? `Options offered: ${formatAnswerForPrompt(options)}` : null,
+    starterCode ? `Starter code given to the learner:\n${starterCode}` : null,
+    `The learner's answer (incorrect): ${formatAnswerForPrompt(userAnswer)}`,
+    `Correct answer: ${formatAnswerForPrompt(correctAnswer)}`,
+    `Original explanation already shown to the learner: ${explanation}`,
+    '',
+    "Explain why the learner's specific answer was wrong and help them understand the correct reasoning, going beyond just repeating the original explanation above.",
   ]
     .filter(Boolean)
     .join('\n');

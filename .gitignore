@@ -25,3 +25,6 @@ yarn-error.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Claude Code local overrides (personal, not team-shared)
+.claude/settings.local.json

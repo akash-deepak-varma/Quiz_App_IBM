@@ -17,32 +17,38 @@ export function computeStreakBonus(currentStreak) {
 
 // range: 'week' | 'alltime'. Streak bonus is range-independent by design (current
 // momentum), so it's added once to both the weekly and all-time score.
+//
+// xp is denormalized onto Attempt at submit-time (see quiz.controller.js#submit) using this
+// same computeAttemptXP formula, so the weekly/all-time sum here is a plain indexed groupBy
+// instead of a full-table scan joined against every Quiz.
 export async function getLeaderboard(range = 'week') {
   const since = range === 'week' ? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) : null;
 
-  const [attempts, users] = await Promise.all([
-    prisma.attempt.findMany({
+  const [xpGroups, streaks] = await Promise.all([
+    prisma.attempt.groupBy({
+      by: ['userId'],
       where: { completedAt: since ? { gte: since } : { not: null } },
-      include: { quiz: true, _count: { select: { answerLogs: true } } },
+      _sum: { xp: true },
     }),
-    prisma.user.findMany({ include: { streak: true } }),
+    // Every user who has ever completed an attempt gets a Streak row (recordActivityAndGetStreak),
+    // and applyStreakActivity never resets currentStreak back to 0 -- so this population, filtered
+    // to currentStreak > 0, is exactly who a full user scan would have produced non-zero rows for,
+    // without pulling every never-active signup into memory. It also preserves a real subtlety of
+    // the old behavior: a user whose only attempt predates the weekly window still shows up here
+    // with their streak-only score, same as before.
+    prisma.streak.findMany({
+      where: { currentStreak: { gt: 0 } },
+      include: { user: { select: { name: true } } },
+    }),
   ]);
 
-  const xpByUser = new Map();
-  for (const attempt of attempts) {
-    const xp = computeAttemptXP({
-      difficulty: attempt.quiz.difficulty,
-      numQuestions: attempt._count.answerLogs,
-      accuracy: attempt.score,
-    });
-    xpByUser.set(attempt.userId, (xpByUser.get(attempt.userId) ?? 0) + xp);
-  }
+  const xpByUser = new Map(xpGroups.map((g) => [g.userId, g._sum.xp ?? 0]));
 
-  const rows = users
-    .map((user) => ({
-      userId: user.id,
-      name: user.name,
-      score: (xpByUser.get(user.id) ?? 0) + computeStreakBonus(user.streak?.currentStreak),
+  const rows = streaks
+    .map((s) => ({
+      userId: s.userId,
+      name: s.user.name,
+      score: (xpByUser.get(s.userId) ?? 0) + computeStreakBonus(s.currentStreak),
     }))
     .filter((row) => row.score > 0)
     .sort((a, b) => b.score - a.score)

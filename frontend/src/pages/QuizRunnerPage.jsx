@@ -4,6 +4,7 @@ import { QuizRunnerProvider, useQuizRunner } from '../context/QuizRunnerContext.
 import QuestionRenderer from '../components/questions/QuestionRenderer.jsx';
 import ProgressBar from '../components/ProgressBar.jsx';
 import { apiFetch } from '../api/client.js';
+import { ErrorBanner } from '../components/AsyncState.jsx';
 
 function QuizRunnerInner() {
   const navigate = useNavigate();
@@ -33,7 +34,7 @@ function QuizRunnerInner() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-4 sm:p-6">
       <ProgressBar current={currentIndex} total={totalQuestions} />
-      {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+      {error && <ErrorBanner message={error} />}
       <div className="rounded-lg bg-white p-4 shadow sm:p-6">
         <QuestionRenderer
           question={currentQuestion}
@@ -76,7 +77,7 @@ export default function QuizRunnerPage() {
   // No GET /api/quiz/:id endpoint exists to recover this on a hard refresh or direct visit --
   // the quiz can only arrive via in-app navigation carrying it in route state.
   if (!quiz) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/" replace state={{ notice: 'That quiz session was not found — generate a new one.' }} />;
   }
 
   return (
