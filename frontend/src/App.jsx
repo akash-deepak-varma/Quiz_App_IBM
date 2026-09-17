@@ -7,6 +7,7 @@ import { LoadingIndicator } from './components/AsyncState.jsx';
 const LoginPage = lazy(() => import('./pages/LoginPage.jsx'));
 const SignupPage = lazy(() => import('./pages/SignupPage.jsx'));
 const GenerateQuizPage = lazy(() => import('./pages/GenerateQuizPage.jsx'));
+const QuizLibraryPage = lazy(() => import('./pages/QuizLibraryPage.jsx'));
 const QuizRunnerPage = lazy(() => import('./pages/QuizRunnerPage.jsx'));
 const ResultsPage = lazy(() => import('./pages/ResultsPage.jsx'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
@@ -41,6 +42,14 @@ function AppRoutes() {
             element={
               <RequireAuth>
                 <GenerateQuizPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/library"
+            element={
+              <RequireAuth>
+                <QuizLibraryPage />
               </RequireAuth>
             }
           />

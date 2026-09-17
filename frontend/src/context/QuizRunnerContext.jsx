@@ -2,7 +2,8 @@ import { createContext, useContext, useRef, useState, useCallback, useMemo } fro
 
 const QuizRunnerContext = createContext(null);
 
-export function QuizRunnerProvider({ quiz, children }) {
+export function QuizRunnerProvider({ quiz: initialQuiz, children }) {
+  const [quiz, setQuiz] = useState(initialQuiz);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState({});
   const startedAtRef = useRef(Date.now());
@@ -21,6 +22,16 @@ export function QuizRunnerProvider({ quiz, children }) {
 
   const getElapsedSeconds = useCallback(() => Math.round((Date.now() - startedAtRef.current) / 1000), []);
 
+  // Only the display fields (id/type/prompt/options/starterCode) are kept -- correctAnswer/
+  // explanation come back from the edit/regenerate endpoints but must not linger in state any
+  // longer than the edit form needs them, since this is the same shape generate/retake expose.
+  const replaceQuestion = useCallback((questionId, displayFields) => {
+    setQuiz((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) => (q.id === questionId ? { ...q, ...displayFields } : q)),
+    }));
+  }, []);
+
   const value = useMemo(
     () => ({
       quiz,
@@ -32,8 +43,9 @@ export function QuizRunnerProvider({ quiz, children }) {
       goNext,
       goBack,
       getElapsedSeconds,
+      replaceQuestion,
     }),
-    [quiz, currentIndex, answers, setAnswer, goNext, goBack, getElapsedSeconds]
+    [quiz, currentIndex, answers, setAnswer, goNext, goBack, getElapsedSeconds, replaceQuestion]
   );
 
   return <QuizRunnerContext.Provider value={value}>{children}</QuizRunnerContext.Provider>;

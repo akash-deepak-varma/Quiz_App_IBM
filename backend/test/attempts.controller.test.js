@@ -37,8 +37,27 @@ async function generateAndSubmit(token, { correct }) {
     .set('Authorization', `Bearer ${token}`)
     .send({ answers: [{ questionId, userAnswer }], timeSpentSeconds: 5 });
 
-  return { attemptId: submitRes.body.attemptId, questionId };
+  return { attemptId: submitRes.body.attemptId, questionId, prompt: generateRes.body.questions[0].prompt };
 }
+
+describe('GET /api/attempts/:id', () => {
+  beforeEach(resetDb);
+
+  it('includes the question prompt in each result', async () => {
+    const token = await signup('viewer@example.com');
+    const { attemptId, questionId, prompt } = await generateAndSubmit(token, { correct: true });
+
+    const res = await request(app)
+      .get(`/api/attempts/${attemptId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send();
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toHaveLength(1);
+    expect(res.body.results[0].questionId).toBe(questionId);
+    expect(res.body.results[0].prompt).toBe(prompt);
+  });
+});
 
 describe('POST /api/attempts/:id/questions/:questionId/explain', () => {
   beforeEach(resetDb);

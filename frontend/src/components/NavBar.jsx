@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 
 const LINKS = [
   { to: '/', label: 'Generate' },
+  { to: '/library', label: 'Library' },
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/leaderboard', label: 'Leaderboard' },
   { to: '/badges', label: 'Badges' },

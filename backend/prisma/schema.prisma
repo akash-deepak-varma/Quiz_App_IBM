@@ -1,5 +1,5 @@
 datasource db {
-  provider = "sqlite" // switch to "postgresql" + a Postgres DATABASE_URL for prod; nothing else here needs to change
+  provider = "postgresql" // local Postgres for now; swap DATABASE_URL alone to move to a managed provider later
   url      = env("DATABASE_URL")
 }
 
@@ -26,6 +26,7 @@ model User {
   attempts     Attempt[]
   streak       Streak?
   badges       UserBadge[]
+  favorites    Favorite[]
 }
 
 model Topic {
@@ -53,6 +54,7 @@ model Quiz {
   createdAt    DateTime   @default(now())
   questions    Question[]
   attempts     Attempt[]
+  favorites    Favorite[]
 
   @@index([userId])
   @@index([topicId])
@@ -133,4 +135,16 @@ model UserBadge {
 
   @@unique([userId, badgeId]) // also covers userId lookups as the composite's leading column
   @@index([badgeId])
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  quizId    String
+  quiz      Quiz     @relation(fields: [quizId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, quizId]) // also covers userId lookups as the composite's leading column
+  @@index([quizId])
 }

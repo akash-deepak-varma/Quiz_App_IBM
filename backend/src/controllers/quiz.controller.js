@@ -6,8 +6,9 @@ import { recordActivityAndGetStreak } from '../services/streakService.js';
 import { evaluateAndAwardBadges } from '../services/badgeService.js';
 import { computeAttemptXP } from '../services/leaderboardService.js';
 import { toJsonOrNull, fromJsonOrNull } from '../lib/serialization.js';
-import { BadRequestError, NotFoundError } from '../lib/errors.js';
+import { BadRequestError, ConflictError, NotFoundError } from '../lib/errors.js';
 import { DIFFICULTIES, QUESTION_TYPES, AI_PROVIDERS, MIN_QUESTIONS, MAX_QUESTIONS } from '../constants/enums.js';
+import { validateQuestion } from '../validation/quizSchema.js';
 
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
@@ -21,7 +22,7 @@ function sanitizeNotes(notes) {
 
 export async function generate(req, res, next) {
   try {
-    const { topic, notes, difficulty = 'beginner', numQuestions = 5, typeMix, provider } = req.body || {};
+    const { topic, notes, difficulty = 'beginner', numQuestions = 5, typeMix, provider, tags } = req.body || {};
 
     if (!isNonEmptyString(topic)) {
       throw new BadRequestError('topic is required');
@@ -43,9 +44,13 @@ export async function generate(req, res, next) {
     if (provider !== undefined && !AI_PROVIDERS.includes(provider)) {
       throw new BadRequestError(`provider must be one of ${AI_PROVIDERS.join(', ')}`);
     }
+    if (tags !== undefined && !(Array.isArray(tags) && tags.every((t) => typeof t === 'string'))) {
+      throw new BadRequestError('tags must be an array of strings');
+    }
 
     const cleanTopic = topic.trim();
     const cleanNotes = sanitizeNotes(notes);
+    const cleanTags = [...new Set((tags ?? []).map((t) => t.trim()).filter(Boolean))];
 
     const { quiz: rawQuiz, providerUsed } = await generateValidatedQuiz({
       topic: cleanTopic,
@@ -59,6 +64,14 @@ export async function generate(req, res, next) {
     let topicRow = await prisma.topic.findUnique({ where: { name: cleanTopic } });
     if (!topicRow) {
       topicRow = await prisma.topic.create({ data: { name: cleanTopic } });
+    }
+    if (cleanTags.length > 0) {
+      await prisma.topic.update({
+        where: { id: topicRow.id },
+        data: {
+          tags: { connectOrCreate: cleanTags.map((name) => ({ where: { name }, create: { name } })) },
+        },
+      });
     }
 
     const quiz = await prisma.quiz.create({
@@ -86,6 +99,35 @@ export async function generate(req, res, next) {
     res.status(201).json({
       quizId: quiz.id,
       topic: cleanTopic,
+      difficulty: quiz.difficulty,
+      providerUsed: quiz.providerUsed,
+      questions: quiz.questions.map((q) => ({
+        id: q.id,
+        type: q.type,
+        prompt: q.prompt,
+        options: fromJsonOrNull(q.optionsJson),
+        starterCode: q.starterCode,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getForRetake(req, res, next) {
+  try {
+    const { id } = req.params;
+    const quiz = await prisma.quiz.findUnique({
+      where: { id },
+      include: { topic: true, questions: { orderBy: { orderIndex: 'asc' } } },
+    });
+    if (!quiz || quiz.userId !== req.user.id) {
+      throw new NotFoundError('Quiz not found');
+    }
+
+    res.json({
+      quizId: quiz.id,
+      topic: quiz.topic.name,
       difficulty: quiz.difficulty,
       providerUsed: quiz.providerUsed,
       questions: quiz.questions.map((q) => ({
@@ -168,6 +210,7 @@ export async function submit(req, res, next) {
       results: graded.map((g) => ({
         questionId: g.question.id,
         type: g.question.type,
+        prompt: g.question.prompt,
         isCorrect: g.isCorrect,
         correctAnswer: g.correctAnswer,
         explanation: g.question.explanation,
@@ -177,6 +220,115 @@ export async function submit(req, res, next) {
       newBadges: newBadges.map((b) => ({ id: b.id, name: b.name, description: b.description })),
       streak: { current: streak.currentStreak, longest: streak.longestStreak },
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+function serializeEditableQuestion(question) {
+  return {
+    id: question.id,
+    type: question.type,
+    prompt: question.prompt,
+    options: fromJsonOrNull(question.optionsJson),
+    starterCode: question.starterCode,
+    correctAnswer: fromJsonOrNull(question.correctAnswer),
+    explanation: question.explanation,
+  };
+}
+
+async function loadOwnedQuizQuestion(userId, quizId, questionId) {
+  const quiz = await prisma.quiz.findUnique({ where: { id: quizId }, include: { topic: true } });
+  if (!quiz || quiz.userId !== userId) {
+    throw new NotFoundError('Quiz not found');
+  }
+  const question = await prisma.question.findUnique({ where: { id: questionId } });
+  if (!question || question.quizId !== quizId) {
+    throw new NotFoundError('Question not found');
+  }
+  const attemptCount = await prisma.attempt.count({ where: { quizId } });
+  if (attemptCount > 0) {
+    throw new ConflictError('This quiz already has attempts -- its questions can no longer be edited');
+  }
+  return { quiz, question };
+}
+
+export async function getEditableQuestion(req, res, next) {
+  try {
+    const { quizId, questionId } = req.params;
+    const { question } = await loadOwnedQuizQuestion(req.user.id, quizId, questionId);
+    res.json(serializeEditableQuestion(question));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateQuestion(req, res, next) {
+  try {
+    const { quizId, questionId } = req.params;
+    const { question } = await loadOwnedQuizQuestion(req.user.id, quizId, questionId);
+
+    const { prompt, options, starterCode, correctAnswer, explanation } = req.body || {};
+    const merged = {
+      type: question.type,
+      prompt: prompt !== undefined ? prompt : question.prompt,
+      options: options !== undefined ? options : fromJsonOrNull(question.optionsJson),
+      starterCode: starterCode !== undefined ? starterCode : question.starterCode,
+      correctAnswer: correctAnswer !== undefined ? correctAnswer : fromJsonOrNull(question.correctAnswer),
+      explanation: explanation !== undefined ? explanation : question.explanation,
+    };
+
+    const errors = [];
+    validateQuestion(merged, 0, errors);
+    if (errors.length > 0) {
+      throw new BadRequestError(errors.join('; '));
+    }
+
+    const updated = await prisma.question.update({
+      where: { id: questionId },
+      data: {
+        prompt: merged.prompt,
+        optionsJson: toJsonOrNull(merged.options),
+        starterCode: merged.starterCode,
+        correctAnswer: JSON.stringify(merged.correctAnswer),
+        explanation: merged.explanation,
+      },
+    });
+
+    res.json(serializeEditableQuestion(updated));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function regenerateQuestion(req, res, next) {
+  try {
+    const { quizId, questionId } = req.params;
+    const { quiz, question } = await loadOwnedQuizQuestion(req.user.id, quizId, questionId);
+
+    const { quiz: rawQuiz } = await generateValidatedQuiz({
+      topic: quiz.topic.name,
+      notes: quiz.sourceNotes,
+      difficulty: quiz.difficulty,
+      numQuestions: 1,
+      typeMix: [question.type],
+      provider: quiz.providerUsed,
+    });
+    const regenerated = rawQuiz.questions[0];
+
+    const updated = await prisma.question.update({
+      where: { id: questionId },
+      data: {
+        type: regenerated.type,
+        prompt: regenerated.prompt,
+        optionsJson: toJsonOrNull(regenerated.options ?? null),
+        starterCode: regenerated.starterCode ?? null,
+        correctAnswer: JSON.stringify(regenerated.correctAnswer),
+        explanation: regenerated.explanation,
+      },
+    });
+
+    res.json(serializeEditableQuestion(updated));
   } catch (err) {
     next(err);
   }

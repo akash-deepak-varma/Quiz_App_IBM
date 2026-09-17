@@ -4,7 +4,8 @@ export default defineConfig({
   test: {
     globalSetup: ['./test/setup/globalSetup.js'],
     setupFiles: ['./test/setup/env.js'],
-    // Multiple test files would otherwise write to the same shared SQLite test.db concurrently.
+    // All test files share the same Postgres "test" schema and truncate the same tables
+    // between runs (see test/setup -- resetDb), so they can't run concurrently.
     fileParallelism: false,
   },
 });

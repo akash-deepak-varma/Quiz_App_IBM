@@ -19,6 +19,7 @@ export async function getAttempt(req, res, next) {
       results: attempt.answerLogs.map((log) => ({
         questionId: log.questionId,
         type: log.question.type,
+        prompt: log.question.prompt,
         isCorrect: log.isCorrect,
         correctAnswer: fromJsonOrNull(log.question.correctAnswer),
         explanation: log.question.explanation,

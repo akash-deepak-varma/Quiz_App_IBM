@@ -18,7 +18,7 @@ function sameMultiset(a, b) {
   return sortedA.every((item, i) => item === sortedB[i]);
 }
 
-function validateQuestion(q, index, errors) {
+export function validateQuestion(q, index, errors) {
   const prefix = `questions[${index}]`;
 
   if (!q || typeof q !== 'object') {

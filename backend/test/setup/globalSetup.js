@@ -1,19 +1,25 @@
 import { execSync } from 'node:child_process';
-import { existsSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import 'dotenv/config';
+import { testDatabaseUrl } from './testDatabaseUrl.js';
 
 const backendRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
-const testDbPath = path.join(backendRoot, 'prisma', 'test.db');
 
 export default function setup() {
-  for (const suffix of ['', '-journal', '-wal', '-shm']) {
-    const p = testDbPath + suffix;
-    if (existsSync(p)) unlinkSync(p);
-  }
+  const env = { ...process.env, DATABASE_URL: testDatabaseUrl(process.env.DATABASE_URL) };
+
+  // Drop and recreate the "test" schema so every run starts from a clean slate -- the same
+  // guarantee the old delete-the-sqlite-test.db-file approach gave us.
+  execSync('npx prisma db execute --stdin --schema prisma/schema.prisma', {
+    cwd: backendRoot,
+    env,
+    input: 'DROP SCHEMA IF EXISTS "test" CASCADE;',
+    stdio: ['pipe', 'inherit', 'inherit'],
+  });
   execSync('npx prisma migrate deploy', {
     cwd: backendRoot,
-    env: { ...process.env, DATABASE_URL: 'file:./test.db' },
+    env,
     stdio: 'inherit',
   });
 }

@@ -79,6 +79,7 @@ describe('POST /api/quiz/:id/submit', () => {
 
     const quizId = generateRes.body.quizId;
     const answers = generateRes.body.questions.map((q) => ({ questionId: q.id, userAnswer: 'true' }));
+    const promptsByQuestionId = new Map(generateRes.body.questions.map((q) => [q.id, q.prompt]));
 
     const submitRes = await request(app)
       .post(`/api/quiz/${quizId}/submit`)
@@ -92,6 +93,7 @@ describe('POST /api/quiz/:id/submit', () => {
       expect(result.isCorrect).toBe(true);
       expect(result.correctAnswer).toBe('true');
       expect(result.explanation).toBeTypeOf('string');
+      expect(result.prompt).toBe(promptsByQuestionId.get(result.questionId));
     }
     expect(Array.isArray(submitRes.body.newBadges)).toBe(true);
     expect(submitRes.body.streak.current).toBeGreaterThanOrEqual(1);
@@ -114,5 +116,114 @@ describe('POST /api/quiz/:id/submit', () => {
       .send({ answers: [{ questionId: generateRes.body.questions[0].id, userAnswer: 'true' }] });
 
     expect(submitRes.status).toBe(404);
+  });
+});
+
+describe('PATCH /api/quiz/:quizId/questions/:questionId', () => {
+  beforeEach(resetDb);
+
+  it('updates a question on a quiz with no attempts yet', async () => {
+    const token = await signup('editor@example.com');
+    const generateRes = await request(app)
+      .post('/api/quiz/generate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ topic: 'Editing', difficulty: 'beginner', numQuestions: 1, typeMix: ['true_false'] });
+    const quizId = generateRes.body.quizId;
+    const questionId = generateRes.body.questions[0].id;
+
+    const res = await request(app)
+      .patch(`/api/quiz/${quizId}/questions/${questionId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ prompt: 'Edited prompt', explanation: 'Edited explanation' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.prompt).toBe('Edited prompt');
+    expect(res.body.explanation).toBe('Edited explanation');
+    expect(res.body.correctAnswer).toBe('true');
+  });
+
+  it('returns 409 once the quiz has an attempt', async () => {
+    const token = await signup('editor-locked@example.com');
+    const generateRes = await request(app)
+      .post('/api/quiz/generate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ topic: 'Editing locked', difficulty: 'beginner', numQuestions: 1, typeMix: ['true_false'] });
+    const quizId = generateRes.body.quizId;
+    const questionId = generateRes.body.questions[0].id;
+
+    await request(app)
+      .post(`/api/quiz/${quizId}/submit`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ answers: [{ questionId, userAnswer: 'true' }] });
+
+    const res = await request(app)
+      .patch(`/api/quiz/${quizId}/questions/${questionId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ prompt: 'Should not apply' });
+
+    expect(res.status).toBe(409);
+  });
+
+  it('returns 404 when the quiz is owned by a different user', async () => {
+    const ownerToken = await signup('edit-owner@example.com');
+    const intruderToken = await signup('edit-intruder@example.com');
+    const generateRes = await request(app)
+      .post('/api/quiz/generate')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ topic: 'Edit ownership', difficulty: 'beginner', numQuestions: 1, typeMix: ['true_false'] });
+    const quizId = generateRes.body.quizId;
+    const questionId = generateRes.body.questions[0].id;
+
+    const res = await request(app)
+      .patch(`/api/quiz/${quizId}/questions/${questionId}`)
+      .set('Authorization', `Bearer ${intruderToken}`)
+      .send({ prompt: 'Hijacked' });
+
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('POST /api/quiz/:quizId/questions/:questionId/regenerate', () => {
+  beforeEach(resetDb);
+
+  it('regenerates a question on a quiz with no attempts yet', async () => {
+    const token = await signup('regen@example.com');
+    const generateRes = await request(app)
+      .post('/api/quiz/generate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ topic: 'Regenerating', difficulty: 'beginner', numQuestions: 1, typeMix: ['true_false'] });
+    const quizId = generateRes.body.quizId;
+    const questionId = generateRes.body.questions[0].id;
+
+    const res = await request(app)
+      .post(`/api/quiz/${quizId}/questions/${questionId}/regenerate`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(questionId);
+    expect(res.body.type).toBe('true_false');
+    expect(res.body.prompt).toBeTypeOf('string');
+    expect(res.body.correctAnswer).toBeTruthy();
+  });
+
+  it('returns 409 once the quiz has an attempt', async () => {
+    const token = await signup('regen-locked@example.com');
+    const generateRes = await request(app)
+      .post('/api/quiz/generate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ topic: 'Regenerate locked', difficulty: 'beginner', numQuestions: 1, typeMix: ['true_false'] });
+    const quizId = generateRes.body.quizId;
+    const questionId = generateRes.body.questions[0].id;
+
+    await request(app)
+      .post(`/api/quiz/${quizId}/submit`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ answers: [{ questionId, userAnswer: 'true' }] });
+
+    const res = await request(app)
+      .post(`/api/quiz/${quizId}/questions/${questionId}/regenerate`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(409);
   });
 });

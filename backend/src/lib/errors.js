@@ -24,6 +24,12 @@ export class NotFoundError extends HttpError {
   }
 }
 
+export class ConflictError extends HttpError {
+  constructor(message = 'Conflict') {
+    super(message, 409);
+  }
+}
+
 export class UnsupportedProviderError extends BadRequestError {
   constructor(name) {
     super(`Unsupported AI provider: "${name}"`);

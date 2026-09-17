@@ -23,6 +23,7 @@ export default function GenerateQuizPage() {
   // a failed submit) shouldn't keep re-showing a notice from an earlier navigation.
   const [notice] = useState(location.state?.notice ?? null);
   const [topic, setTopic] = useState('');
+  const [tags, setTags] = useState('');
   const [notes, setNotes] = useState('');
   const [difficulty, setDifficulty] = useState('beginner');
   const [numQuestions, setNumQuestions] = useState(5);
@@ -49,6 +50,7 @@ export default function GenerateQuizPage() {
           numQuestions: Number(numQuestions),
           typeMix: typeMix.length > 0 ? typeMix : undefined,
           provider,
+          tags: tags.trim() ? tags.split(',').map((t) => t.trim()).filter(Boolean) : undefined,
         },
       });
       navigate(`/quiz/${quiz.quizId}/run`, { state: { quiz } });
@@ -73,6 +75,17 @@ export default function GenerateQuizPage() {
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
             placeholder="e.g. JavaScript closures"
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Tags (optional, comma-separated)</label>
+          <input
+            type="text"
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            placeholder="e.g. interview-prep, week-3"
             className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
           />
         </div>

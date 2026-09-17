@@ -29,7 +29,8 @@ function ResultRow({ result: r, index, attemptId }) {
   return (
     <div className={`rounded-lg border p-4 ${r.isCorrect ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
       <p className="text-sm font-medium text-slate-500">Question {index + 1}</p>
-      <p className={`mt-1 font-semibold ${r.isCorrect ? 'text-green-700' : 'text-red-700'}`}>
+      <MathText as="p" className="mt-1 font-medium text-slate-800" text={r.prompt} />
+      <p className={`mt-2 font-semibold ${r.isCorrect ? 'text-green-700' : 'text-red-700'}`}>
         {r.isCorrect ? 'Correct' : 'Incorrect'}
       </p>
       <div className="mt-2 space-y-1 text-sm text-slate-600">
