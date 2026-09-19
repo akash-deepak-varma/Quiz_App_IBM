@@ -28,3 +28,5 @@ Thumbs.db
 
 # Claude Code local overrides (personal, not team-shared)
 .claude/settings.local.json
+handoff.md
+architecture.md

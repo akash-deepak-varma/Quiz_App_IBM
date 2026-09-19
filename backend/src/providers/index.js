@@ -9,6 +9,7 @@ import { env } from '../config/env.js';
 // is what's actually callable. claude/openai only construct their SDK clients lazily
 // inside generateQuiz/gradeShortAnswer, so registering them here has no effect (no
 // eager network calls, no key-presence checks) unless AI_PROVIDER actually selects one.
+//
 const providers = {
   mock: mockProvider,
   claude: claudeProvider,
