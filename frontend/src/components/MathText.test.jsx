@@ -25,4 +25,37 @@ describe('MathText', () => {
     const { container } = render(<MathText text="This costs $5 total." />);
     expect(container.textContent).toBe('This costs $5 total.');
   });
+
+  it('renders a fenced code block inside a <pre>, with no KaTeX applied', () => {
+    const { container } = render(<MathText text={'```\nconst x = 1;\n```'} />);
+    const pre = container.querySelector('pre');
+    expect(pre).not.toBeNull();
+    expect(pre.textContent).toBe('const x = 1;');
+    expect(container.querySelector('.katex')).toBeNull();
+  });
+
+  it('shows the fence language as a label when present', () => {
+    const { container } = render(<MathText text={'```python\nprint(1)\n```'} />);
+    expect(container.textContent).toContain('python');
+    expect(container.querySelector('pre').textContent).toBe('print(1)');
+  });
+
+  it('renders inline code inside a <code> element', () => {
+    const { container } = render(<MathText text="Call `foo()` to start." />);
+    const code = container.querySelector('code');
+    expect(code).not.toBeNull();
+    expect(code.textContent).toBe('foo()');
+  });
+
+  it('does not treat a $ inside a fenced code block as math', () => {
+    const { container } = render(<MathText text={'```\nconst price = "$5";\n```'} />);
+    expect(container.querySelector('.katex')).toBeNull();
+    expect(container.querySelector('pre').textContent).toBe('const price = "$5";');
+  });
+
+  it('preserves newlines in plain text so multi-paragraph text does not collapse', () => {
+    const { container } = render(<MathText text={'Line one.\n\nLine two.'} />);
+    expect(container.textContent).toBe('Line one.\n\nLine two.');
+    expect(container.querySelector('span[style]').style.whiteSpace).toBe('pre-wrap');
+  });
 });

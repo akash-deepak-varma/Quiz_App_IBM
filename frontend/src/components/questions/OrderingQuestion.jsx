@@ -29,7 +29,7 @@ export default function OrderingQuestion({ question, value, onChange }) {
 
   return (
     <div className="space-y-3">
-      <MathText as="p" className="text-lg text-slate-800" text={question.prompt} />
+      <MathText as="p" className="text-lg leading-relaxed text-slate-800" text={question.prompt} />
       <p className="text-sm text-slate-500">Arrange these in the correct order.</p>
       <span aria-live="polite" className="sr-only">
         {announcement}

@@ -10,7 +10,7 @@ export default function CodeQuestion({ question, value, onChange }) {
 
   return (
     <div className="space-y-3">
-      <MathText as="p" className="text-lg text-slate-800" text={question.prompt} />
+      <MathText as="p" className="text-lg leading-relaxed text-slate-800" text={question.prompt} />
       <div className="overflow-hidden rounded border border-slate-300" role="group" aria-label={question.prompt}>
         <CodeMirror value={code} height="240px" extensions={[javascript()]} onChange={(next) => onChange(next)} />
       </div>

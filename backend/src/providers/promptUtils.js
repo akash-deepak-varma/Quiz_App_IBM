@@ -9,16 +9,55 @@ export function extractJsonFromText(text) {
     throw new Error('extractJsonFromText expected a string');
   }
 
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fenced ? fenced[1] : text;
+  const trimmed = text.trim();
 
+  // Best case: provider followed instructions and returned pure JSON.
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Fall through for providers that add surrounding prose/fences.
+  }
+
+  // Only strip a markdown fence if it surrounds the ENTIRE response.
+  let candidate = trimmed;
+
+  const outerFence = trimmed.match(
+    /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i
+  );
+
+  if (outerFence) {
+    candidate = outerFence[1].trim();
+
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Fall through to extraction below.
+    }
+  }
+
+  // Find JSON object boundaries in the full response.
   const start = candidate.indexOf('{');
   const end = candidate.lastIndexOf('}');
+
   if (start === -1 || end === -1 || end < start) {
     throw new Error('No JSON object found in provider response');
   }
 
-  return JSON.parse(candidate.slice(start, end + 1));
+  const jsonText = candidate.slice(start, end + 1);
+
+  try {
+    return JSON.parse(jsonText);
+  } catch (error) {
+    console.error('[AI] Failed to parse provider JSON', {
+      message: error.message,
+      responsePreview: candidate.slice(0, 500),
+    });
+
+    throw new Error(
+      `Invalid JSON in provider response: ${error.message}`,
+      { cause: error }
+    );
+  }
 }
 
 // Formatting instruction shared by generation and the mistake-explanation prompt so LaTeX
@@ -27,6 +66,16 @@ const MATH_FORMATTING_RULE =
   'When a topic involves mathematical notation, write it as LaTeX using $...$ for inline math ' +
   'and $$...$$ for standalone equations -- the app renders this notation, so prefer it over ' +
   'ASCII math (x^2, sqrt(x)) or spelled-out symbols.';
+
+// Formatting instruction shared by generation and the mistake-explanation prompt so code
+// snippets mentioned in prose actually render specially (see MathText.jsx). This is about
+// backticks INSIDE "prompt"/"explanation" string values only -- it must not be read as
+// contradicting the "no markdown code fences" instruction about the outer JSON response.
+const CODE_FORMATTING_RULE =
+  'When "prompt" or "explanation" text includes a code snippet, wrap inline code in single ' +
+  'backticks (`like this`) and multi-line code in triple-backtick fences -- the app renders ' +
+  'these specially. This applies only to backticks inside those string values, not to the ' +
+  'overall JSON response itself, which must still have no surrounding markdown fences.';
 
 const TYPE_RULES = `
 Question type rules:
@@ -74,6 +123,7 @@ export function buildQuizGenerationPrompt({ topic, notes, difficulty, numQuestio
     DIFFICULTY_RULES,
     QUESTION_QUALITY_RULES,
     MATH_FORMATTING_RULE,
+    CODE_FORMATTING_RULE,
   ].join('\n\n');
 
   const user = [
@@ -182,6 +232,7 @@ export function buildExplainMistakePrompt({
     'Respond with ONLY a single valid JSON object: {"explanation": "string"}. No markdown code fences, no commentary before or after.',
     'In the explanation: (1) name the specific misconception likely behind THIS answer (not a generic wrong-answer explanation), (2) contrast it with the correct reasoning, (3) end with one concrete, memorable takeaway. Keep it focused -- a short paragraph, not an essay.',
     MATH_FORMATTING_RULE,
+    CODE_FORMATTING_RULE,
   ].join('\n');
 
   const user = [

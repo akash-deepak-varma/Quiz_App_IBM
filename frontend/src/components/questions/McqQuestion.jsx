@@ -3,7 +3,7 @@ import MathText from '../MathText.jsx';
 export default function McqQuestion({ question, value, onChange }) {
   return (
     <div className="space-y-3">
-      <MathText as="p" className="text-lg text-slate-800" text={question.prompt} />
+      <MathText as="p" className="text-lg leading-relaxed text-slate-800" text={question.prompt} />
       <div className="space-y-2" role="radiogroup" aria-label={question.prompt}>
         {question.options.map((option) => (
           <label

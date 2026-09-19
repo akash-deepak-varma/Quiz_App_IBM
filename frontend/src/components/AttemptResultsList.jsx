@@ -29,18 +29,24 @@ function ResultRow({ result: r, index, attemptId }) {
   return (
     <div className={`rounded-lg border p-4 ${r.isCorrect ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
       <p className="text-sm font-medium text-slate-500">Question {index + 1}</p>
-      <MathText as="p" className="mt-1 font-medium text-slate-800" text={r.prompt} />
+      <MathText as="p" className="mt-1 font-medium leading-relaxed text-slate-800" text={r.prompt} />
       <p className={`mt-2 font-semibold ${r.isCorrect ? 'text-green-700' : 'text-red-700'}`}>
         {r.isCorrect ? 'Correct' : 'Incorrect'}
       </p>
       <div className="mt-2 space-y-1 text-sm text-slate-600">
         <p>Your answer:</p>
-        <pre className="whitespace-pre-wrap rounded bg-white/60 p-2 font-mono text-xs">{formatAnswer(r.userAnswer)}</pre>
+        <pre className="whitespace-pre-wrap rounded bg-white/60 p-2 font-mono text-xs">
+          <MathText as="span" text={formatAnswer(r.userAnswer)} />
+        </pre>
         <p>Correct answer:</p>
-        <pre className="whitespace-pre-wrap rounded bg-white/60 p-2 font-mono text-xs">{formatAnswer(r.correctAnswer)}</pre>
+        <pre className="whitespace-pre-wrap rounded bg-white/60 p-2 font-mono text-xs">
+          <MathText as="span" text={formatAnswer(r.correctAnswer)} />
+        </pre>
       </div>
-      {r.aiFeedback && <MathText as="p" className="mt-2 text-sm italic text-slate-500" text={r.aiFeedback} />}
-      <MathText as="p" className="mt-2 text-sm text-slate-700" text={r.explanation} />
+      {r.aiFeedback && (
+        <MathText as="p" className="mt-2 text-sm italic leading-relaxed text-slate-500" text={r.aiFeedback} />
+      )}
+      <MathText as="p" className="mt-2 text-sm leading-relaxed text-slate-700" text={r.explanation} />
 
       {!r.isCorrect && (
         <div className="mt-3">
@@ -58,7 +64,7 @@ function ResultRow({ result: r, index, attemptId }) {
           {explainState === 'loaded' && (
             <div className="mt-2 rounded border border-red-200 bg-white p-3">
               <p className="text-xs font-semibold uppercase text-red-500">Understanding your mistake</p>
-              <MathText as="p" className="mt-1 text-sm text-slate-700" text={mistakeExplanation} />
+              <MathText as="p" className="mt-1 text-sm leading-relaxed text-slate-700" text={mistakeExplanation} />
             </div>
           )}
         </div>

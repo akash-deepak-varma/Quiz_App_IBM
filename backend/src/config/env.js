@@ -10,13 +10,13 @@ export const env = {
   // stalled ICA gateway call to look indistinguishable from a hang. maxRetries relies on
   // each SDK's own built-in backoff (network errors/408/409/429/5xx only, never a 4xx
   // validation-style response), so no hand-rolled retry logic is needed here.
-  aiProviderTimeoutMs: Number(process.env.AI_PROVIDER_TIMEOUT_MS) || 20000,
+  aiProviderTimeoutMs: Number(process.env.AI_PROVIDER_TIMEOUT_MS) || 40000,
   aiProviderMaxRetries: Number(process.env.AI_PROVIDER_MAX_RETRIES) || 2,
 
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY || '',
     baseURL: process.env.ANTHROPIC_BASE_URL,
-    model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022',
+    model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
   },
   openai: {
     apiKey: process.env.OPENAI_API_KEY || '',

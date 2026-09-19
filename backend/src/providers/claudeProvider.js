@@ -8,53 +8,112 @@ import {
   buildExplainMistakePrompt,
 } from './promptUtils.js';
 
-// Richer explanations plus up to MAX_QUESTIONS (20) questions can exceed a smaller cap and
-// truncate the JSON response, so this is sized generously rather than tightly.
 const MAX_TOKENS = 8192;
 
 function getClient() {
-  // ICA's gateway expects Bearer-token auth -- `authToken` sends `Authorization: Bearer <key>`,
-  // unlike the SDK's default `apiKey` option which signs requests differently.
   return new Anthropic({
     baseURL: env.anthropic.baseURL,
+
+    // Your ICA-compatible gateway expects:
+    // Authorization: Bearer <token>
     authToken: env.anthropic.apiKey,
-    timeout: env.aiProviderTimeoutMs,
-    maxRetries: env.aiProviderMaxRetries,
+
+    // milliseconds
+    timeout: env.aiProviderTimeoutMs ?? 180_000,
+
+    // SDK already retries transient/network failures.
+    maxRetries: env.aiProviderMaxRetries ?? 1,
   });
 }
 
 async function complete(system, user) {
   const client = getClient();
-  const response = await client.messages.create({
-    model: env.anthropic.model,
-    max_tokens: MAX_TOKENS,
-    system,
-    messages: [{ role: 'user', content: user }],
-  });
 
-  const textBlock = response.content.find((block) => block.type === 'text');
-  if (!textBlock) {
-    throw new Error('Claude response contained no text content');
+  const startedAt = Date.now();
+
+  try {
+    console.log('[AI] Starting Claude request', {
+      model: env.anthropic.model,
+      timeoutMs: env.aiProviderTimeoutMs,
+      maxRetries: env.aiProviderMaxRetries,
+      promptLength: user.length,
+    });
+
+    const response = await client.messages.create({
+      model: env.anthropic.model,
+      max_tokens: MAX_TOKENS,
+      system,
+      messages: [
+        {
+          role: 'user',
+          content: user,
+        },
+      ],
+    });
+
+    // console.log("\n========== RAW CLAUDE RESPONSE ==========");
+    // console.log(JSON.stringify(response, null, 2));
+    // console.log("=========================================\n");
+
+    console.log('[AI] Claude request completed', {
+      durationMs: Date.now() - startedAt,
+      stopReason: response.stop_reason,
+      inputTokens: response.usage?.input_tokens,
+      outputTokens: response.usage?.output_tokens,
+    });
+
+    const textBlock = response.content.find(
+      (block) => block.type === 'text'
+    );
+
+    if (!textBlock) {
+      throw new Error('Claude response contained no text content');
+    }
+
+
+    return textBlock.text;
+  } catch (error) {
+    console.error('[AI] Claude request failed', {
+      durationMs: Date.now() - startedAt,
+      name: error?.name,
+      message: error?.message,
+      status: error?.status,
+      requestId: error?.request_id,
+      cause: error?.cause?.message,
+    });
+
+    throw error;
   }
-  return textBlock.text;
 }
 
 export async function generateQuiz(params) {
   const { system, user } = buildQuizGenerationPrompt(params);
-  return extractJsonFromText(await complete(system, user));
+
+  const text = await complete(system, user);
+
+  return extractJsonFromText(text);
 }
 
 export async function gradeShortAnswer(params) {
   const { system, user } = buildGradeShortAnswerPrompt(params);
-  return extractJsonFromText(await complete(system, user));
+
+  return extractJsonFromText(
+    await complete(system, user)
+  );
 }
 
 export async function gradeCode(params) {
   const { system, user } = buildGradeCodePrompt(params);
-  return extractJsonFromText(await complete(system, user));
+
+  return extractJsonFromText(
+    await complete(system, user)
+  );
 }
 
 export async function explainMistake(params) {
   const { system, user } = buildExplainMistakePrompt(params);
-  return extractJsonFromText(await complete(system, user));
+
+  return extractJsonFromText(
+    await complete(system, user)
+  );
 }

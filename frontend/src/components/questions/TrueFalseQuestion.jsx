@@ -5,7 +5,7 @@ export default function TrueFalseQuestion({ question, value, onChange }) {
 
   return (
     <div className="space-y-3">
-      <MathText as="p" className="text-lg text-slate-800" text={question.prompt} />
+      <MathText as="p" className="text-lg leading-relaxed text-slate-800" text={question.prompt} />
       <div className="flex gap-3" role="group" aria-label={question.prompt}>
         {options.map((option) => (
           <button
@@ -17,7 +17,7 @@ export default function TrueFalseQuestion({ question, value, onChange }) {
               value === option ? 'border-slate-800 bg-slate-100' : 'border-slate-200'
             }`}
           >
-            {option}
+            <MathText as="span" text={option} />
           </button>
         ))}
       </div>

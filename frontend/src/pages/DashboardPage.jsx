@@ -5,6 +5,7 @@ import { retakeQuiz } from '../utils/retake.js';
 import AccuracyTrendChart from '../components/charts/AccuracyTrendChart.jsx';
 import TopicAccuracyChart from '../components/charts/TopicAccuracyChart.jsx';
 import AttemptResultsList from '../components/AttemptResultsList.jsx';
+import MathText from '../components/MathText.jsx';
 import { LoadingIndicator, PageError, ErrorBanner } from '../components/AsyncState.jsx';
 
 // Every question here has already been answered at least once, so its quiz always has at
@@ -17,17 +18,18 @@ function RetakeQuestionList({ questions, navigate, onError }) {
   return (
     <ul className="divide-y divide-slate-100">
       {questions.map((q) => (
-        <li key={q.questionId} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2 text-sm">
-          <span>
-            {q.prompt} <span className="text-slate-400">({q.topic})</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => retakeQuiz(navigate, q.quizId, 1).catch((err) => onError(err.message))}
-            className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
-          >
-            Retake this quiz
-          </button>
+        <li key={q.questionId} className="space-y-1 py-2 text-sm">
+          <MathText as="p" className="leading-relaxed" text={q.prompt} />
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <span className="text-slate-400">{q.topic}</span>
+            <button
+              type="button"
+              onClick={() => retakeQuiz(navigate, q.quizId, 1).catch((err) => onError(err.message))}
+              className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+            >
+              Retake this quiz
+            </button>
+          </div>
         </li>
       ))}
     </ul>
