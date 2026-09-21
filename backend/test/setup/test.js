@@ -1,5 +1,28 @@
 import Anthropic from '@anthropic-ai/sdk';
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({
+  path: path.resolve(__dirname, '../../.env'),
+});
+
+console.log({
+  baseURL: process.env.ANTHROPIC_BASE_URL,
+  model: process.env.ANTHROPIC_MODEL,
+
+  apiKeyLoaded: !!process.env.ANTHROPIC_API_KEY,
+  apiKeyLength: process.env.ANTHROPIC_API_KEY?.length,
+
+  startsWithBearer:
+    process.env.ANTHROPIC_API_KEY?.startsWith('Bearer '),
+
+  startsWithSk:
+    process.env.ANTHROPIC_API_KEY?.startsWith('sk-'),
+});
 
 const client = new Anthropic({
   baseURL: process.env.ANTHROPIC_BASE_URL,
@@ -14,7 +37,6 @@ try {
   const response = await client.messages.create({
     model: process.env.ANTHROPIC_MODEL,
     max_tokens: 50,
-
     messages: [
       {
         role: 'user',

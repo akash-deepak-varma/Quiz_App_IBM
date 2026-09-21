@@ -1,0 +1,11 @@
+{
+  "name": "Quiz_app",
+  "private": true,
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "dev": "concurrently --kill-others -n BACKEND,FRONTEND \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
