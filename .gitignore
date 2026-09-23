@@ -30,3 +30,8 @@ Thumbs.db
 .claude/settings.local.json
 handoff.md
 architecture.md
+
+problems.md
+solution.md
+handoff.md
+.claude/*
