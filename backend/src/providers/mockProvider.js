@@ -1,5 +1,13 @@
 import { QUESTION_TYPES } from '../constants/enums.js';
 
+// Fixture data is generated locally, so it is never truncated and never needs schema coercion.
+export const capabilities = {
+  structuredOutput: true,
+  promptCaching: false,
+  streaming: false,
+  maxOutputTokens: Number.POSITIVE_INFINITY,
+};
+
 function buildQuestion(type, index, topic) {
   switch (type) {
     case 'mcq':
@@ -65,13 +73,30 @@ function buildQuestion(type, index, topic) {
   }
 }
 
-export async function generateQuiz({ topic, difficulty, numQuestions, typeMix }) {
+/**
+ * `startIndex` matters: every fixture prompt ends in `(#N)` derived from the question index, so two
+ * same-type batches both numbering from 0 would produce byte-identical questions, which the
+ * orchestrator's dedupe step rejects. The orchestrator hands out non-overlapping index ranges;
+ * honouring them here is what keeps mock-provider generation deterministic *and* collision-free.
+ *
+ * `typeCounts` (e.g. `{ mcq: 2, debug: 1 }`) is the batch's exact per-type request. When absent
+ * this falls back to the original round-robin over `typeMix`.
+ */
+export async function generateQuiz({
+  topic,
+  difficulty,
+  numQuestions,
+  typeMix,
+  typeCounts,
+  startIndex = 0,
+}) {
   const types = Array.isArray(typeMix) && typeMix.length > 0 ? typeMix : QUESTION_TYPES;
 
-  const questions = Array.from({ length: numQuestions }, (_, index) => {
-    const type = types[index % types.length];
-    return buildQuestion(type, index, topic);
-  });
+  const order = typeCounts
+    ? Object.entries(typeCounts).flatMap(([type, count]) => Array.from({ length: count }, () => type))
+    : Array.from({ length: numQuestions }, (_, index) => types[index % types.length]);
+
+  const questions = order.map((type, index) => buildQuestion(type, startIndex + index, topic));
 
   return { topic, difficulty, questions };
 }

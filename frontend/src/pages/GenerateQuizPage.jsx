@@ -41,7 +41,10 @@ export default function GenerateQuizPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const quiz = await apiFetch('/quiz/generate', {
+      // Queues the work and returns immediately; the progress page follows the job from there.
+      // The old call generated the whole quiz inside this request, which is why a 20-question quiz
+      // meant minutes on a spinner that could still end in "Something went wrong".
+      const job = await apiFetch('/quiz/generations', {
         method: 'POST',
         body: {
           topic,
@@ -53,7 +56,7 @@ export default function GenerateQuizPage() {
           tags: tags.trim() ? tags.split(',').map((t) => t.trim()).filter(Boolean) : undefined,
         },
       });
-      navigate(`/quiz/${quiz.quizId}/run`, { state: { quiz } });
+      navigate(`/quiz/generating/${job.generationId}`);
     } catch (err) {
       setError(err.message);
       setSubmitting(false);
@@ -163,7 +166,7 @@ export default function GenerateQuizPage() {
           disabled={submitting}
           className="w-full rounded bg-slate-800 px-4 py-2 text-white hover:bg-slate-700 disabled:opacity-50"
         >
-          {submitting ? 'Generating...' : 'Generate quiz'}
+          {submitting ? 'Starting...' : 'Generate quiz'}
         </button>
       </form>
     </div>

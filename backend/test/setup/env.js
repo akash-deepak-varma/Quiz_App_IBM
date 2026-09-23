@@ -9,4 +9,7 @@ import { testDatabaseUrl } from './testDatabaseUrl.js';
 
 process.env.DATABASE_URL = testDatabaseUrl(process.env.DATABASE_URL);
 process.env.AI_PROVIDER = 'mock';
+// Generation emits one structured log line per batch attempt; several suites deliberately drive
+// batches to failure, which would bury the actual test output.
+process.env.GENERATION_LOG = 'off';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-only-secret-do-not-use-in-prod';

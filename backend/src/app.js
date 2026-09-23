@@ -3,6 +3,7 @@ import cors from 'cors';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/auth.routes.js';
 import quizRoutes from './routes/quiz.routes.js';
+import generationRoutes from './routes/generation.routes.js';
 import libraryRoutes, { topicsRouter } from './routes/library.routes.js';
 import attemptsRoutes from './routes/attempts.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
@@ -21,6 +22,9 @@ app.get('/api/health', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/quiz', libraryRoutes);
+// Before quizRoutes on purpose: that router owns `/:id`, which would otherwise swallow
+// `/generations` and answer a job poll with "Quiz not found".
+app.use('/api/quiz/generations', generationRoutes);
 app.use('/api/quiz', quizRoutes);
 app.use('/api/topics', topicsRouter);
 app.use('/api/attempts', attemptsRoutes);

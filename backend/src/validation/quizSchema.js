@@ -85,6 +85,56 @@ export function validateQuestion(q, index, errors) {
   }
 }
 
+/**
+ * Per-item validation for one generation batch.
+ *
+ * `validateQuizSchema` is all-or-nothing: one malformed question invalidates the whole payload.
+ * That is the right contract for a finished quiz, and wrong for a batch -- it is why a single bad
+ * question used to throw away nineteen good ones. This validates each item independently so the
+ * caller can keep what is usable and re-request only the shortfall.
+ *
+ * Two deliberate differences from `validateQuizSchema`:
+ *  - `topic` / `difficulty` are not required. The caller asked for both, so a missing echo field
+ *    is cosmetic; rejecting a batch over it reintroduces exactly the whole-response failure mode.
+ *  - `typeQuota` caps how many of each type are accepted. A model that returns five MCQs for a
+ *    "3 MCQ + 2 debug" batch would otherwise silently skew the quiz's type mix.
+ *
+ * @returns {{envelopeErrors: string[], items: Array<{index: number, ok: boolean, errors: string[], question: any}>}}
+ */
+export function validateQuizBatch(raw, { typeQuota } = {}) {
+  if (!raw || typeof raw !== 'object') {
+    return { envelopeErrors: ['Batch payload must be an object'], items: [] };
+  }
+  if (!Array.isArray(raw.questions) || raw.questions.length === 0) {
+    return { envelopeErrors: ['questions must be a non-empty array'], items: [] };
+  }
+
+  const remaining = typeQuota ? new Map(Object.entries(typeQuota)) : null;
+
+  const items = raw.questions.map((q, index) => {
+    const errors = [];
+    validateQuestion(q, index, errors);
+
+    if (remaining && errors.length === 0) {
+      const left = remaining.get(q.type);
+      if (left === undefined) {
+        errors.push(
+          `questions[${index}].type "${q.type}" was not requested in this batch ` +
+            `(expected one of ${[...remaining.keys()].join(', ')})`
+        );
+      } else if (left <= 0) {
+        errors.push(`questions[${index}] exceeds the requested count for type "${q.type}"`);
+      } else {
+        remaining.set(q.type, left - 1);
+      }
+    }
+
+    return { index, ok: errors.length === 0, errors, question: q };
+  });
+
+  return { envelopeErrors: [], items };
+}
+
 export function validateQuizSchema(raw) {
   const errors = [];
 

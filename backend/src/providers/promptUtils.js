@@ -1,4 +1,15 @@
 import { QUESTION_TYPES } from '../constants/enums.js';
+import {
+  SYSTEM_PREAMBLE,
+  JSON_ONLY_RULE,
+  MATH_FORMATTING_RULE,
+  CODE_FORMATTING_RULE,
+  EXPLANATION_QUALITY_RULES,
+  RESPONSE_SHAPE,
+  pedagogyRules,
+} from './prompts/common.js';
+import { buildTypeRules } from './prompts/typeRules.js';
+import { buildDifficultyRules } from './prompts/difficultyRules.js';
 
 // Shared by claudeProvider.js and openaiProvider.js. Neither real provider depends on
 // Claude tool-use or OpenAI's `response_format: json_object` -- unconfirmed whether
@@ -60,102 +71,92 @@ export function extractJsonFromText(text) {
   }
 }
 
-// Formatting instruction shared by generation and the mistake-explanation prompt so LaTeX
-// written by either path actually renders (see frontend/src/components/MathText.jsx).
-const MATH_FORMATTING_RULE =
-  'When a topic involves mathematical notation, write it as LaTeX using $...$ for inline math ' +
-  'and $$...$$ for standalone equations -- the app renders this notation, so prefer it over ' +
-  'ASCII math (x^2, sqrt(x)) or spelled-out symbols.';
+// Prompt fragments live in ./prompts/*. This module stays the single import surface for both real
+// providers (and promptUtils.test.js), so the split is invisible to callers.
+export { MATH_FORMATTING_RULE, CODE_FORMATTING_RULE, RESPONSE_SHAPE } from './prompts/common.js';
+export { TYPE_RULES, buildTypeRules } from './prompts/typeRules.js';
+export { DIFFICULTY_RULES, buildDifficultyRules } from './prompts/difficultyRules.js';
 
-// Formatting instruction shared by generation and the mistake-explanation prompt so code
-// snippets mentioned in prose actually render specially (see MathText.jsx). This is about
-// backticks INSIDE "prompt"/"explanation" string values only -- it must not be read as
-// contradicting the "no markdown code fences" instruction about the outer JSON response.
-const CODE_FORMATTING_RULE =
-  'When "prompt" or "explanation" text includes a code snippet, wrap inline code in single ' +
-  'backticks (`like this`) and multi-line code in triple-backtick fences -- the app renders ' +
-  'these specially. This applies only to backticks inside those string values, not to the ' +
-  'overall JSON response itself, which must still have no surrounding markdown fences.';
+/** How many "already covered" prompts to quote back. Enough to steer away from repeats, small
+ *  enough that the hint cannot itself become the thing that overflows the output budget. */
+const MAX_AVOID_HINTS = 12;
+const AVOID_HINT_MAX_CHARS = 160;
 
-const TYPE_RULES = `
-Question type rules:
-- "mcq": options = 3-5 answer strings; correctAnswer = exactly one of those strings. Always single-select -- never an array, the UI has no way to indicate multi-select to the learner. Wrong options (distractors) should be plausible -- each one should reflect a real misconception, not an obviously-silly choice.
-- "true_false": options = ["true", "false"]; correctAnswer = "true" or "false" (lowercase). Avoid trivially-worded statements; the statement should require actually understanding the concept, not just spotting an extreme word like "always"/"never".
-- "ordering": options = the steps/items in SHUFFLED order; correctAnswer = the same strings in the correct order (a permutation of options). The steps should test understanding of a process or sequence, not arbitrary list order.
-- "short_answer": options = null, starterCode = null; correctAnswer = a short reference answer (graded by rubric, not exact match). Ask for an explanation or reasoning, not a one-word fact lookup.
-- "code_completion": options = null; starterCode = a snippet with a gap for the learner to fill in; correctAnswer = the FULL corrected code (the whole function, not just the missing piece) -- it is compared against the learner's entire submitted code.
-- "debug": options = null; starterCode = a snippet containing a deliberate bug; correctAnswer = the FULL fixed code (the whole function) -- compared against the learner's entire submitted code. The bug should stem from a common, realistic misconception, not a typo.
-Every question needs a non-empty "explanation" string.
-`.trim();
+/**
+ * Describe the batch's request precisely. `typeCounts` ("2 mcq, 1 debug") beats the old
+ * "cycle through these types as needed", which left the split to the model and made the returned
+ * type mix unverifiable.
+ */
+function describeRequest({ numQuestions, types, typeCounts }) {
+  if (typeCounts && Object.keys(typeCounts).length > 0) {
+    const parts = Object.entries(typeCounts).map(([type, count]) => `${count} x "${type}"`);
+    return `Generate exactly ${numQuestions} quiz question(s): ${parts.join(', ')}.`;
+  }
+  return [
+    `Generate exactly ${numQuestions} quiz question(s).`,
+    `Use only these question types, cycling through them as needed: ${types.join(', ')}.`,
+  ].join('\n');
+}
 
-const PEDAGOGY_RULES = `
-Pedagogy rules -- the goal is for the learner to understand the concept, not just recall a fact:
-- Prefer questions that require applying, comparing, or reasoning about a concept over questions that only ask "what is the definition of X".
-- Where the concept has a common misconception or a subtle "gotcha", design at least some questions around it -- that is where real understanding is built.
-- Vary the cognitive level across the quiz: mix straightforward recall with "why does this happen", "what would this produce", and "which approach is better and why" style questions.
-- Distribute the requested question types roughly evenly rather than clustering the same type together.
-`.trim();
-
-const DIFFICULTY_RULES = `
-Difficulty calibration:
-- "beginner": foundational, single-concept questions; distractors are clearly different ideas, not near-misses.
-- "intermediate": combines two related concepts, or requires tracing through a short piece of logic/code; distractors reflect plausible partial understanding.
-- "advanced": edge cases, performance/design trade-offs, or subtle bugs; distractors reflect real, specific misconceptions an experienced learner could still fall for.
-`.trim();
-
-const QUESTION_QUALITY_RULES = `
-Explanation quality rules -- "explanation" must teach, not just confirm the answer:
-- State WHY the correct answer is correct, not only that it is.
-- For mcq/true_false, briefly note why the most tempting wrong option is wrong (name the misconception it reflects).
-- End with one short, concrete takeaway the learner can remember and reuse.
-- Keep it focused: 2-4 sentences is usually enough -- depth, not length, is the goal.
-`.trim();
-
-export function buildQuizGenerationPrompt({ topic, notes, difficulty, numQuestions, typeMix }) {
+/**
+ * @param {object} params
+ * @param {string[]} [params.typeMix]        types this batch may return
+ * @param {Record<string, number>} [params.typeCounts]  exact per-type counts for this batch
+ * @param {number} [params.startIndex]       position of this batch within the whole quiz
+ * @param {string[]} [params.avoidPrompts]   prompts already accepted elsewhere in this quiz
+ * @param {string|null} [params.correction]  what went wrong with the previous attempt
+ */
+export function buildQuizGenerationPrompt({
+  topic,
+  notes,
+  difficulty,
+  numQuestions,
+  typeMix,
+  typeCounts,
+  startIndex = 0,
+  totalQuestions,
+  avoidPrompts,
+  correction,
+}) {
   const types = Array.isArray(typeMix) && typeMix.length > 0 ? typeMix : QUESTION_TYPES;
 
   const system = [
-    'You are a quiz-generation engine for a developer learning app. Your goal is to help the ' +
-      'learner genuinely understand the topic, not just test recall of facts.',
-    'Respond with ONLY a single valid JSON object. No markdown code fences, no commentary before or after, no trailing commas.',
-    TYPE_RULES,
-    PEDAGOGY_RULES,
-    DIFFICULTY_RULES,
-    QUESTION_QUALITY_RULES,
+    SYSTEM_PREAMBLE,
+    JSON_ONLY_RULE,
+    buildTypeRules(types),
+    pedagogyRules({ multipleTypes: types.length > 1 }),
+    buildDifficultyRules(difficulty),
+    EXPLANATION_QUALITY_RULES,
+    // Only send the formatting rules a batch of these types could actually need.
     MATH_FORMATTING_RULE,
     CODE_FORMATTING_RULE,
   ].join('\n\n');
 
+  const hints = Array.isArray(avoidPrompts) ? avoidPrompts.filter(Boolean).slice(-MAX_AVOID_HINTS) : [];
+
   const user = [
-    `Generate exactly ${numQuestions} quiz question(s) about: "${topic}".`,
+    // A correction goes first: it is the one instruction that differs from the failed attempt,
+    // and burying it under the boilerplate is how the old blind retry effectively ignored it.
+    correction ? `IMPORTANT -- correcting a previous failed attempt: ${correction}` : null,
+    `${describeRequest({ numQuestions, types, typeCounts })} Topic: "${topic}".`,
     `Difficulty: ${difficulty}.`,
-    `Use only these question types, cycling through them as needed: ${types.join(', ')}.`,
+    totalQuestions && totalQuestions > numQuestions
+      ? `These are questions ${startIndex + 1}-${startIndex + numQuestions} of a ${totalQuestions}-question quiz on this topic.`
+      : null,
     notes
       ? `The learner provided these notes. Use them to infer the concepts they're studying and ` +
         `write questions that test understanding of those concepts -- do NOT just turn ` +
         `individual sentences from the notes into direct recall questions:\n${notes}`
       : null,
+    hints.length > 0
+      ? `These questions are already covered elsewhere in this quiz -- ask about something different:\n${hints
+          .map((prompt) => `- ${String(prompt).slice(0, AVOID_HINT_MAX_CHARS)}`)
+          .join('\n')}`
+      : null,
     'Every question should require some reasoning, however small -- avoid pure lookup/definition questions when a deeper version is possible.',
     '',
     'Respond with exactly this JSON shape:',
-    JSON.stringify(
-      {
-        topic: 'string',
-        difficulty: 'beginner|intermediate|advanced',
-        questions: [
-          {
-            type: 'one of the allowed types',
-            prompt: 'string',
-            options: 'string[] or null -- see type rules',
-            starterCode: 'string or null -- see type rules',
-            correctAnswer: 'string or string[] -- see type rules',
-            explanation: 'string',
-          },
-        ],
-      },
-      null,
-      2
-    ),
+    RESPONSE_SHAPE,
   ]
     .filter(Boolean)
     .join('\n');

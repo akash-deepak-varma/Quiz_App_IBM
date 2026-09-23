@@ -78,4 +78,104 @@ describe('claudeProvider / openaiProvider resilience wiring', () => {
 
     vi.doUnmock('@anthropic-ai/sdk');
   });
+
+  // A response cut off at the token limit used to surface only as unparseable JSON, so the retry
+  // asked for the same oversized batch and truncated again.
+  it('reports a Claude response stopped at the token limit as a truncation, not a parse error', async () => {
+    vi.resetModules();
+    vi.doMock('@anthropic-ai/sdk', () => ({
+      default: class {
+        constructor() {
+          this.messages = {
+            create: vi.fn().mockResolvedValue({
+              stop_reason: 'max_tokens',
+              content: [{ type: 'text', text: '{"topic":"t","questions":[{"type":"mcq"' }],
+            }),
+          };
+        }
+      },
+    }));
+
+    const claudeProvider = await import('../src/providers/claudeProvider.js');
+    const { TruncatedResponseError } = await import('../src/lib/errors.js');
+
+    await expect(
+      claudeProvider.generateQuiz({ topic: 't', difficulty: 'beginner', numQuestions: 20 })
+    ).rejects.toThrow(TruncatedResponseError);
+
+    vi.doUnmock('@anthropic-ai/sdk');
+  });
+
+  it('reports an OpenAI response with finish_reason "length" as a truncation', async () => {
+    vi.resetModules();
+    vi.doMock('openai', () => ({
+      default: class {
+        constructor() {
+          this.chat = {
+            completions: {
+              create: vi.fn().mockResolvedValue({
+                choices: [{ finish_reason: 'length', message: { content: '{"questions":[' } }],
+              }),
+            },
+          };
+        }
+      },
+    }));
+
+    const openaiProvider = await import('../src/providers/openaiProvider.js');
+    const { TruncatedResponseError } = await import('../src/lib/errors.js');
+
+    await expect(
+      openaiProvider.generateQuiz({ topic: 't', difficulty: 'beginner', numQuestions: 20 })
+    ).rejects.toThrow(TruncatedResponseError);
+
+    vi.doUnmock('openai');
+  });
+
+  it('sends an explicit output-token cap to OpenAI, which previously had none', async () => {
+    vi.resetModules();
+    const create = vi.fn().mockResolvedValue({
+      choices: [{ finish_reason: 'stop', message: { content: '{"topic":"t","difficulty":"beginner","questions":[]}' } }],
+    });
+    vi.doMock('openai', () => ({
+      default: class {
+        constructor() {
+          this.chat = { completions: { create } };
+        }
+      },
+    }));
+
+    const openaiProvider = await import('../src/providers/openaiProvider.js');
+    await openaiProvider.generateQuiz({ topic: 't', difficulty: 'beginner', numQuestions: 1 });
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: expect.any(Number) }));
+
+    vi.doUnmock('openai');
+  });
+
+  it('reuses one SDK client across calls instead of constructing one per request', async () => {
+    vi.resetModules();
+    const ctor = vi.fn();
+    vi.doMock('@anthropic-ai/sdk', () => ({
+      default: class {
+        constructor(opts) {
+          ctor(opts);
+          this.messages = {
+            create: vi.fn().mockResolvedValue({
+              stop_reason: 'end_turn',
+              content: [{ type: 'text', text: '{"topic":"t","difficulty":"beginner","questions":[]}' }],
+            }),
+          };
+        }
+      },
+    }));
+
+    const claudeProvider = await import('../src/providers/claudeProvider.js');
+    await claudeProvider.generateQuiz({ topic: 't', difficulty: 'beginner', numQuestions: 1 });
+    await claudeProvider.generateQuiz({ topic: 't', difficulty: 'beginner', numQuestions: 1 });
+
+    expect(ctor).toHaveBeenCalledTimes(1);
+
+    vi.doUnmock('@anthropic-ai/sdk');
+  });
 });

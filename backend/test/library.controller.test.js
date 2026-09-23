@@ -1,21 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import { app } from '../src/app.js';
-import { prisma } from '../src/lib/prismaClient.js';
-
-async function resetDb() {
-  await prisma.favorite.deleteMany();
-  await prisma.answerLog.deleteMany();
-  await prisma.attempt.deleteMany();
-  await prisma.userBadge.deleteMany();
-  await prisma.streak.deleteMany();
-  await prisma.question.deleteMany();
-  await prisma.quiz.deleteMany();
-  await prisma.tag.deleteMany();
-  await prisma.topic.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.org.deleteMany();
-}
+import { resetDb } from './setup/resetDb.js';
 
 async function signup(email) {
   const res = await request(app)

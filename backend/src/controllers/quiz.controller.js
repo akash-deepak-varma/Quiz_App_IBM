@@ -5,100 +5,43 @@ import { scoreAnswer, computeAttemptScore } from '../services/quizScoringService
 import { recordActivityAndGetStreak } from '../services/streakService.js';
 import { evaluateAndAwardBadges } from '../services/badgeService.js';
 import { computeAttemptXP } from '../services/leaderboardService.js';
+import { materializeQuiz } from '../services/quizMaterializationService.js';
+import { mapWithConcurrency } from '../services/generation/pool.js';
 import { toJsonOrNull, fromJsonOrNull } from '../lib/serialization.js';
 import { BadRequestError, ConflictError, NotFoundError } from '../lib/errors.js';
-import { DIFFICULTIES, QUESTION_TYPES, AI_PROVIDERS, MIN_QUESTIONS, MAX_QUESTIONS } from '../constants/enums.js';
 import { validateQuestion } from '../validation/quizSchema.js';
+import { parseGenerateRequest } from '../validation/generateRequest.js';
 
-function isNonEmptyString(value) {
-  return typeof value === 'string' && value.trim().length > 0;
-}
-
-function sanitizeNotes(notes) {
-  if (typeof notes !== 'string') return null;
-  const stripped = notes.replace(/<[^>]*>/g, '').trim().slice(0, 20000);
-  return stripped || null;
-}
+// Grading fans out over the same bounded pool generation uses. Kept modest on purpose: a 20-question
+// submission where every answer needs the provider should not open 20 simultaneous requests.
+const GRADING_CONCURRENCY = 3;
 
 export async function generate(req, res, next) {
   try {
-    const { topic, notes, difficulty = 'beginner', numQuestions = 5, typeMix, provider, tags } = req.body || {};
-
-    if (!isNonEmptyString(topic)) {
-      throw new BadRequestError('topic is required');
-    }
-    if (!DIFFICULTIES.includes(difficulty)) {
-      throw new BadRequestError(`difficulty must be one of ${DIFFICULTIES.join(', ')}`);
-    }
-    const count = Number(numQuestions);
-    if (!Number.isInteger(count) || count < MIN_QUESTIONS || count > MAX_QUESTIONS) {
-      throw new BadRequestError(`numQuestions must be an integer between ${MIN_QUESTIONS} and ${MAX_QUESTIONS}`);
-    }
-    if (typeMix !== undefined) {
-      const isValidTypeMix =
-        Array.isArray(typeMix) && typeMix.length > 0 && typeMix.every((t) => QUESTION_TYPES.includes(t));
-      if (!isValidTypeMix) {
-        throw new BadRequestError(`typeMix must be a non-empty array drawn from ${QUESTION_TYPES.join(', ')}`);
-      }
-    }
-    if (provider !== undefined && !AI_PROVIDERS.includes(provider)) {
-      throw new BadRequestError(`provider must be one of ${AI_PROVIDERS.join(', ')}`);
-    }
-    if (tags !== undefined && !(Array.isArray(tags) && tags.every((t) => typeof t === 'string'))) {
-      throw new BadRequestError('tags must be an array of strings');
-    }
-
-    const cleanTopic = topic.trim();
-    const cleanNotes = sanitizeNotes(notes);
-    const cleanTags = [...new Set((tags ?? []).map((t) => t.trim()).filter(Boolean))];
+    const { topic, notes, difficulty, numQuestions, typeMix, provider, tags } = parseGenerateRequest(req.body);
 
     const { quiz: rawQuiz, providerUsed } = await generateValidatedQuiz({
-      topic: cleanTopic,
-      notes: cleanNotes,
+      topic,
+      notes,
       difficulty,
-      numQuestions: count,
+      numQuestions,
       typeMix,
       provider,
     });
 
-    let topicRow = await prisma.topic.findUnique({ where: { name: cleanTopic } });
-    if (!topicRow) {
-      topicRow = await prisma.topic.create({ data: { name: cleanTopic } });
-    }
-    if (cleanTags.length > 0) {
-      await prisma.topic.update({
-        where: { id: topicRow.id },
-        data: {
-          tags: { connectOrCreate: cleanTags.map((name) => ({ where: { name }, create: { name } })) },
-        },
-      });
-    }
-
-    const quiz = await prisma.quiz.create({
-      data: {
-        userId: req.user.id,
-        topicId: topicRow.id,
-        difficulty,
-        providerUsed,
-        sourceNotes: cleanNotes,
-        questions: {
-          create: rawQuiz.questions.map((q, index) => ({
-            type: q.type,
-            prompt: q.prompt,
-            optionsJson: toJsonOrNull(q.options ?? null),
-            starterCode: q.starterCode ?? null,
-            correctAnswer: JSON.stringify(q.correctAnswer),
-            explanation: q.explanation,
-            orderIndex: index,
-          })),
-        },
-      },
-      include: { questions: { orderBy: { orderIndex: 'asc' } } },
+    const quiz = await materializeQuiz({
+      userId: req.user.id,
+      topic,
+      difficulty,
+      providerUsed,
+      notes,
+      tags,
+      questions: rawQuiz.questions,
     });
 
     res.status(201).json({
       quizId: quiz.id,
-      topic: cleanTopic,
+      topic,
       difficulty: quiz.difficulty,
       providerUsed: quiz.providerUsed,
       questions: quiz.questions.map((q) => ({
@@ -166,8 +109,12 @@ export async function submit(req, res, next) {
     // Iterate the quiz's own question list, not the client-submitted answers -- otherwise
     // a client could omit a question entirely and have it silently excluded from the
     // score average instead of counted as incorrect.
-    const graded = [];
-    for (const question of quiz.questions) {
+    //
+    // Graded concurrently but in order: only short_answer and code questions that failed the exact
+    // match actually call the provider, and grading them one after another made a submission as
+    // slow as the sum of those calls. `mapWithConcurrency` preserves position, which matters --
+    // `computeAttemptScore` and the `answerLogs` rows both read this array by index.
+    const graded = await mapWithConcurrency(quiz.questions, GRADING_CONCURRENCY, async (question) => {
       const userAnswer = answerByQuestionId.has(question.id) ? answerByQuestionId.get(question.id) : null;
       const correctAnswer = fromJsonOrNull(question.correctAnswer);
       const { isCorrect, scoreFraction, aiFeedback } = await scoreAnswer(
@@ -175,8 +122,8 @@ export async function submit(req, res, next) {
         userAnswer,
         provider
       );
-      graded.push({ question, userAnswer, correctAnswer, isCorrect, scoreFraction, aiFeedback });
-    }
+      return { question, userAnswer, correctAnswer, isCorrect, scoreFraction, aiFeedback };
+    });
 
     const parsedTimeSpent = Number(timeSpentSeconds);
     const attemptScore = computeAttemptScore(graded.map((g) => g.scoreFraction));

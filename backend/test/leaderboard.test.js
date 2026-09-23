@@ -1,20 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { prisma } from '../src/lib/prismaClient.js';
 import { getLeaderboard, computeAttemptXP, computeStreakBonus } from '../src/services/leaderboardService.js';
+import { resetDb } from './setup/resetDb.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-async function resetDb() {
-  await prisma.answerLog.deleteMany();
-  await prisma.attempt.deleteMany();
-  await prisma.userBadge.deleteMany();
-  await prisma.streak.deleteMany();
-  await prisma.question.deleteMany();
-  await prisma.quiz.deleteMany();
-  await prisma.topic.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.org.deleteMany();
-}
 
 async function seedUserWithAttempt({ name, difficulty, numQuestions, accuracy, completedAt, currentStreak }) {
   const org = await prisma.org.create({ data: { name: `${name}-org` } });

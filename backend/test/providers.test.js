@@ -58,30 +58,31 @@ describe('generateValidatedQuiz', () => {
     vi.restoreAllMocks();
   });
 
-  it('retries exactly once on invalid-then-valid and returns the valid result', async () => {
+  const trueFalseQuestion = (prompt) => ({
+    type: 'true_false',
+    prompt,
+    options: ['true', 'false'],
+    starterCode: null,
+    correctAnswer: 'true',
+    explanation: 'e',
+  });
+
+  it('re-requests a batch that came back unusable and returns the recovered result', async () => {
     const validQuiz = {
       topic: 'T',
       difficulty: 'beginner',
-      questions: [
-        {
-          type: 'true_false',
-          prompt: 'p',
-          options: ['true', 'false'],
-          starterCode: null,
-          correctAnswer: 'true',
-          explanation: 'e',
-        },
-      ],
+      questions: [trueFalseQuestion('p')],
     };
     const spy = vi
       .spyOn(mockProvider, 'generateQuiz')
-      .mockResolvedValueOnce({ topic: 'T' }) // invalid: missing difficulty/questions
+      .mockResolvedValueOnce({ topic: 'T' }) // unusable: no questions array at all
       .mockResolvedValueOnce(validQuiz);
 
     const result = await generateValidatedQuiz({
       topic: 'T',
       difficulty: 'beginner',
       numQuestions: 1,
+      typeMix: ['true_false'],
       provider: 'mock',
     });
 
@@ -90,13 +91,72 @@ describe('generateValidatedQuiz', () => {
     expect(result.providerUsed).toBe('mock');
   });
 
-  it('throws QuizGenerationFailedError after two consecutively invalid attempts', async () => {
+  // The old generator discarded a whole response if any question in it was malformed. Salvaging
+  // the good ones and re-requesting only the shortfall is the core of the new design.
+  it('keeps the valid questions from a partly-invalid batch and re-requests only the shortfall', async () => {
+    const spy = vi
+      .spyOn(mockProvider, 'generateQuiz')
+      .mockResolvedValueOnce({
+        topic: 'T',
+        difficulty: 'beginner',
+        questions: [
+          trueFalseQuestion('good one'),
+          { type: 'true_false', prompt: '', options: ['true', 'false'], correctAnswer: 'true' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        topic: 'T',
+        difficulty: 'beginner',
+        questions: [trueFalseQuestion('recovered one')],
+      });
+
+    const result = await generateValidatedQuiz({
+      topic: 'T',
+      difficulty: 'beginner',
+      numQuestions: 2,
+      typeMix: ['true_false'],
+      provider: 'mock',
+    });
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    // Only the missing question was asked for the second time, not the whole batch.
+    expect(spy.mock.calls[1][0]).toMatchObject({ numQuestions: 1, typeCounts: { true_false: 1 } });
+    expect(result.quiz.questions.map((q) => q.prompt)).toEqual(['good one', 'recovered one']);
+  });
+
+  it('gives up on a batch after the configured attempt limit and fails the generation', async () => {
     const spy = vi.spyOn(mockProvider, 'generateQuiz').mockResolvedValue({ topic: 'T' });
 
     await expect(
-      generateValidatedQuiz({ topic: 'T', difficulty: 'beginner', numQuestions: 1, provider: 'mock' })
+      generateValidatedQuiz({
+        topic: 'T',
+        difficulty: 'beginner',
+        numQuestions: 1,
+        typeMix: ['true_false'],
+        provider: 'mock',
+      })
     ).rejects.toThrow(QuizGenerationFailedError);
-    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  // A synchronous 201 promises exactly numQuestions questions, so a shortfall must still fail
+  // loudly here. Partial results are the async job path's job.
+  it('fails rather than returning fewer questions than requested', async () => {
+    vi.spyOn(mockProvider, 'generateQuiz').mockResolvedValue({
+      topic: 'T',
+      difficulty: 'beginner',
+      questions: [trueFalseQuestion('only one ever')],
+    });
+
+    await expect(
+      generateValidatedQuiz({
+        topic: 'T',
+        difficulty: 'beginner',
+        numQuestions: 3,
+        typeMix: ['true_false'],
+        provider: 'mock',
+      })
+    ).rejects.toThrow(QuizGenerationFailedError);
   });
 });
 

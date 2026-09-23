@@ -15,24 +15,25 @@ model Org {
 }
 
 model User {
-  id           String      @id @default(cuid())
+  id           String           @id @default(cuid())
   name         String
-  email        String      @unique
+  email        String           @unique
   passwordHash String
   orgId        String
-  org          Org         @relation(fields: [orgId], references: [id])
-  createdAt    DateTime    @default(now())
+  org          Org              @relation(fields: [orgId], references: [id])
+  createdAt    DateTime         @default(now())
   quizzes      Quiz[]
   attempts     Attempt[]
   streak       Streak?
   badges       UserBadge[]
   favorites    Favorite[]
+  generations  QuizGeneration[]
 }
 
 model Topic {
-  id      String  @id @default(cuid())
-  name    String  @unique
-  tags    Tag[]   @relation("TopicTags")
+  id      String @id @default(cuid())
+  name    String @unique
+  tags    Tag[]  @relation("TopicTags")
   quizzes Quiz[]
 }
 
@@ -43,18 +44,19 @@ model Tag {
 }
 
 model Quiz {
-  id           String     @id @default(cuid())
+  id           String          @id @default(cuid())
   userId       String
-  user         User       @relation(fields: [userId], references: [id])
+  user         User            @relation(fields: [userId], references: [id])
   topicId      String
-  topic        Topic      @relation(fields: [topicId], references: [id])
+  topic        Topic           @relation(fields: [topicId], references: [id])
   difficulty   String // beginner | intermediate | advanced -- see src/constants/enums.js
   providerUsed String
   sourceNotes  String?
-  createdAt    DateTime   @default(now())
+  createdAt    DateTime        @default(now())
   questions    Question[]
   attempts     Attempt[]
   favorites    Favorite[]
+  generation   QuizGeneration? // set only for quizzes produced by a background job
 
   @@index([userId])
   @@index([topicId])
@@ -73,19 +75,19 @@ model Question {
   orderIndex    Int
   answerLogs    AnswerLog[]
 
-  @@index([quizId])
+  @@unique([quizId, orderIndex]) // also covers quizId lookups as the composite's leading column
 }
 
 model Attempt {
-  id               String     @id @default(cuid())
+  id               String      @id @default(cuid())
   quizId           String
-  quiz             Quiz       @relation(fields: [quizId], references: [id])
+  quiz             Quiz        @relation(fields: [quizId], references: [id])
   userId           String
-  user             User       @relation(fields: [userId], references: [id])
-  startedAt        DateTime   @default(now())
+  user             User        @relation(fields: [userId], references: [id])
+  startedAt        DateTime    @default(now())
   completedAt      DateTime?
   score            Float? // mean of AnswerLog.scoreFraction, null until submitted
-  xp               Float      @default(0) // computeAttemptXP(...) at submit-time -- see leaderboardService.js
+  xp               Float       @default(0) // computeAttemptXP(...) at submit-time -- see leaderboardService.js
   timeSpentSeconds Int?
   answerLogs       AnswerLog[]
 
@@ -110,10 +112,10 @@ model AnswerLog {
 }
 
 model Streak {
-  userId         String   @id
-  user           User     @relation(fields: [userId], references: [id])
-  currentStreak  Int      @default(0)
-  longestStreak  Int      @default(0)
+  userId         String  @id
+  user           User    @relation(fields: [userId], references: [id])
+  currentStreak  Int     @default(0)
+  longestStreak  Int     @default(0)
   lastActiveDate String? // "YYYY-MM-DD", UTC
 }
 
@@ -147,4 +149,105 @@ model Favorite {
 
   @@unique([userId, quizId]) // also covers userId lookups as the composite's leading column
   @@index([quizId])
+}
+
+// --- Quiz generation jobs -------------------------------------------------------------------
+// Generation used to live entirely inside one HTTP request: nothing survived a timeout, a crash
+// or a partial failure. These three tables are that same work made durable -- the job, one row
+// per batch attempt, and the questions staged before the quiz exists.
+
+model QuizGeneration {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  // The request, captured verbatim so a resumed job re-plans identically. `topic` is a plain
+  // string, not a Topic FK: the Topic row is only created when the quiz materializes, so a job
+  // that never succeeds leaves no orphan topic behind.
+  topic       String
+  notes       String?
+  difficulty  String // beginner | intermediate | advanced -- see src/constants/enums.js
+  typeMixJson String? // JSON.stringify(string[]); null means "every type"
+  tagsJson    String? // JSON.stringify(string[])
+  provider    String // mock | claude | openai
+  requested   Int
+
+  status      String  @default("PENDING") // PENDING | GENERATING | READY | PARTIAL | FAILED | CANCELLED -- see services/generation/orchestrator.js
+  generated   Int     @default(0) // accepted questions so far; what the progress endpoint reports
+  attempts    Int     @default(0) // batch attempts run, across retries
+  planJson    String? // JSON.stringify(plan) -- what the planner decided, for resume and forensics
+  contextMode String? // DIRECT | DISTILLED | RETRIEVAL -- see services/generation/planner.js
+  model       String?
+
+  inputTokens  Int @default(0)
+  outputTokens Int @default(0)
+
+  failureCategory String? // see services/generation/failureCategory.js
+  failureReason   String?
+
+  // Lease-based ownership. A worker claims a job with FOR UPDATE SKIP LOCKED and stamps itself
+  // here; another worker may reclaim the job once the lease goes stale, which is what makes a
+  // crashed worker recoverable rather than a permanently stuck job.
+  lockedAt        DateTime?
+  lockedBy        String?
+  cancelRequested Boolean   @default(false)
+
+  quizId String? @unique
+  quiz   Quiz?   @relation(fields: [quizId], references: [id])
+
+  createdAt  DateTime  @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  batches         GenerationBatch[]
+  stagedQuestions GeneratedQuestion[]
+
+  @@index([userId])
+  @@index([status, createdAt]) // the claim query's WHERE + ORDER BY
+}
+
+model GenerationBatch {
+  id           String         @id @default(cuid())
+  generationId String
+  generation   QuizGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  batchKey  String // planner batch id, e.g. "b2", or "b2.r3" for a retry/split unit
+  typesJson String // JSON.stringify(string[]) -- the types this unit asked for
+  requested Int
+  accepted  Int    @default(0)
+  rejected  Int    @default(0)
+  dupes     Int    @default(0)
+  attempt   Int
+  status    String // SUCCEEDED | PARTIAL | FAILED
+
+  failureCategory String?
+  failureReason   String?
+  durationMs      Int?
+  inputTokens     Int?
+  outputTokens    Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([generationId])
+}
+
+model GeneratedQuestion {
+  id           String         @id @default(cuid())
+  generationId String
+  generation   QuizGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  batchKey      String
+  type          String
+  prompt        String
+  optionsJson   String?
+  starterCode   String?
+  correctAnswer String
+  explanation   String
+  // Position within the finished quiz, assigned when the job materializes. Staging rows are
+  // written the moment a batch validates, before the final ordering is known.
+  orderIndex    Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([generationId])
 }
