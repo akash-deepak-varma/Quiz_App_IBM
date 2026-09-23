@@ -1,6 +1,12 @@
+// GENERATED FILE -- DO NOT EDIT.
+//
+// Produced from prisma/schema.prisma by scripts/syncSqliteSchema.mjs. Edit the canonical schema and
+// re-run that script; `--check` fails the test run if this file is stale. Only the datasource block
+// differs from the canonical schema -- every model below is byte-identical.
+
 datasource db {
-  provider = "postgresql" // local Postgres for now; swap DATABASE_URL alone to move to a managed provider later
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = env("DATABASE_URL") // a file: path, e.g. file:./dev.db -- see lib/dbDialect.js
 }
 
 generator client {

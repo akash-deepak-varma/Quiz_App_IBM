@@ -1,5 +1,7 @@
 import { prisma } from '../lib/prismaClient.js';
 import { BadRequestError, NotFoundError } from '../lib/errors.js';
+import { caseInsensitiveContains } from '../lib/dbDialect.js';
+import { env } from '../config/env.js';
 
 const DEFAULT_TAKE = 20;
 const MAX_TAKE = 100;
@@ -19,7 +21,8 @@ export async function listLibrary(req, res, next) {
 
     const topicFilter = {};
     if (typeof q === 'string' && q.trim()) {
-      topicFilter.name = { contains: q.trim(), mode: 'insensitive' };
+      // `mode: 'insensitive'` is PostgreSQL-only, hence the helper -- see lib/dbDialect.js.
+      topicFilter.name = caseInsensitiveContains(q.trim(), env.databaseProvider);
     } else if (typeof topic === 'string' && topic.trim()) {
       topicFilter.name = topic.trim();
     }

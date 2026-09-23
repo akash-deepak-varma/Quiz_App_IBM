@@ -226,6 +226,42 @@ describe('the generation worker', () => {
     // silently break both expiry and every timestamp shown to the user.
     expect(Math.abs(claimed.lockedAt.getTime() - Date.now())).toBeLessThan(60_000);
   });
+
+  it('refuses a job that a peer claimed between its own read and write', async () => {
+    const token = await signup('async-contention@example.com');
+    const { generationId } = (
+      await enqueue(token, { topic: 'Contended', numQuestions: 1, typeMix: ['true_false'] })
+    ).body;
+
+    // Mutual exclusion used to be the database's job (`FOR UPDATE SKIP LOCKED`) and is now the
+    // query's, because the claim repeats its own predicate inside the UPDATE. The interleaving that
+    // matters is read-then-lose-the-row, and two live claims in one process will *not* produce it --
+    // they serialise on the shared client, so both come back with one winner no matter what the
+    // UPDATE checks. So worker-b's read is paused explicitly and worker-a claims inside that window.
+    // Patched by hand rather than with vi.spyOn: Prisma's model delegates are proxy-backed, so
+    // `mockRestore()` puts back undefined instead of the original method. The restore is the first
+    // statement inside, before any await, so the pause is strictly one-shot even if this throws.
+    const original = prisma.quizGeneration.findMany;
+    let winner;
+    prisma.quizGeneration.findMany = async (args) => {
+      prisma.quizGeneration.findMany = original;
+      const staleCandidates = await prisma.quizGeneration.findMany(args);
+      winner = await claimNextJob({ workerId: 'worker-a' });
+      return staleCandidates;
+    };
+
+    const loser = await claimNextJob({ workerId: 'worker-b' });
+
+    expect(winner.id).toBe(generationId);
+    expect(winner.lockedBy).toBe('worker-a');
+    // The guard fired: worker-b's UPDATE matched zero rows, so it reports no job rather than
+    // becoming a second owner of one already in flight.
+    expect(loser).toBeNull();
+
+    const stored = await prisma.quizGeneration.findUnique({ where: { id: generationId } });
+    expect(stored.lockedBy).toBe('worker-a');
+    expect(stored.status).toBe('GENERATING');
+  });
 });
 
 describe('GET /api/quiz/generations/:id', () => {

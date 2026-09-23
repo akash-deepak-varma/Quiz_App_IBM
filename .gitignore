@@ -5,11 +5,13 @@ node_modules/
 .env
 .env.*.local
 
-# Database
-backend/prisma/dev.db
-backend/prisma/dev.db-journal
+# Database -- SQLite database files are local state. Both engines' *migrations* are tracked
+# (backend/prisma/migrations and backend/prisma/sqlite/migrations), as is the generated
+# backend/prisma/sqlite/schema.prisma. The -wal/-shm siblings appear once WAL mode is on.
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 
 # Build output
 frontend/dist/

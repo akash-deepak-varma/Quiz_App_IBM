@@ -18,15 +18,22 @@ import { createPrismaStore } from './stores.js';
  * is that something: a polling loop that claims one job at a time, runs it through the same
  * `runGeneration` the synchronous endpoint uses, and materializes the quiz when it completes.
  *
- * Deliberately not a message queue. One Node process, one Postgres table, `FOR UPDATE SKIP
- * LOCKED` for the claim -- which is already safe for several workers and several processes, so
- * scaling out later is a deployment change rather than a rewrite.
+ * Deliberately not a message queue: one Node process, one table, and a compare-and-swap claim that
+ * is safe across several workers and several processes, so scaling out later is a deployment change
+ * rather than a rewrite. The claim uses no engine-specific SQL, so this same worker runs on
+ * PostgreSQL and on SQLite -- but only Postgres allows genuinely concurrent writers, so running
+ * *several* worker processes is a Postgres-only deployment shape.
  *
  * Imported by `server.js` only. `app.js` must not start it: every supertest file imports `app`,
  * and a worker booted there would poll the database throughout the test run.
  */
 
 const WORKER_ID = `${os.hostname()}:${process.pid}`;
+
+// How many claimable jobs one poll will try before giving up. Bounded so a single tick cannot walk
+// the whole backlog; if every candidate is lost to a peer, this returns null and the next poll
+// (one second later) picks up from the new oldest.
+const CLAIM_CANDIDATES = 5;
 
 function modelNameFor(provider) {
   if (provider === 'claude') return env.anthropic.model;
@@ -37,47 +44,70 @@ function modelNameFor(provider) {
 /**
  * Take ownership of the oldest job that needs work.
  *
- * `FOR UPDATE SKIP LOCKED` is what makes this safe to run in several processes at once: a
- * concurrent claimer skips the locked row instead of blocking on it or stealing it. The second
- * branch of the WHERE is crash recovery -- a job whose worker died stays `GENERATING` with a stale
- * `lockedAt`, and becomes claimable again once its lease expires.
+ * This is a compare-and-swap, not a lock. Read the oldest claimable jobs, then try to flip one with
+ * the very same predicate repeated inside the UPDATE's WHERE. If the guarded update reports one row
+ * changed, this process owns the job; if it reports none, a peer won the race and we move on to the
+ * next candidate. That is what `FOR UPDATE SKIP LOCKED` used to do here, done optimistically across
+ * two statements instead of pessimistically in one.
  *
- * The table is referenced unqualified on purpose: tests run against the same database under
- * `?schema=test`, so a hardcoded `public.` would send them at the development data.
+ * Why the guard alone is enough on both engines: a peer's UPDATE blocks on the row until the winner
+ * commits and then re-evaluates its own WHERE against committed state -- Postgres READ COMMITTED
+ * does this via EvalPlanQual, and SQLite serialises writers outright. So exactly one claimer can
+ * still see the row as claimable, and `count` is 0 for everybody else. The same reasoning covers two
+ * workers racing to reclaim a single expired lease.
  *
- * Every timestamp here goes through `AT TIME ZONE 'utc'`, and the lease window is computed in SQL
- * rather than passed in as a JS `Date`. Prisma's `DateTime` columns are `timestamp(3)` *without*
- * time zone holding UTC instants, so a bare `now()` writes the server's local wall clock into a
- * column everything else reads as UTC -- and comparing such a column against a driver-typed
- * timestamptz parameter shifts the comparison by the local offset. On a UTC+5:30 machine that made
- * every in-flight job look stale, so the lease protected nothing and two workers could claim the
- * same job; west of UTC it would have done the opposite and stretched the lease.
+ * The second and third OR branches are crash recovery: a job whose worker died stays `GENERATING`
+ * with a stale `lockedAt`, and becomes claimable again once its lease expires.
+ *
+ * There is deliberately no raw SQL left here. The previous version was one
+ * `UPDATE ... FOR UPDATE SKIP LOCKED ... RETURNING *`, which was both Postgres-only and the source
+ * of a bug worth not repeating: `DateTime` columns are `timestamp(3)` *without* time zone holding
+ * UTC instants, so the bare `now()` it first used wrote the server's local wall clock into a column
+ * every other reader treats as UTC. On this UTC+5:30 machine that made every in-flight job look
+ * stale, so the lease protected nothing and two workers could claim one job; west of UTC it would
+ * have stretched the lease instead. Every timestamp below is a JS `Date` bound through Prisma's
+ * typed `DateTime` mapping, which has no local-zone escape hatch to get wrong.
+ *
+ * Cost against the single statement: two extra round trips per claim, and a retry rather than a
+ * skip under contention. At a one-second poll with a handful of workers, that is noise.
  */
 export async function claimNextJob({ workerId = WORKER_ID, leaseMs = env.generationLeaseMs } = {}) {
-  const rows = await prisma.$queryRaw`
-    UPDATE "QuizGeneration"
-       SET status      = 'GENERATING',
-           "lockedAt"  = (now() AT TIME ZONE 'utc'),
-           "lockedBy"  = ${workerId},
-           "startedAt" = COALESCE("startedAt", now() AT TIME ZONE 'utc')
-     WHERE id = (
-       SELECT id
-         FROM "QuizGeneration"
-        WHERE status = 'PENDING'
-           OR (
-             status = 'GENERATING'
-             AND (
-               "lockedAt" IS NULL
-               OR "lockedAt" < (now() AT TIME ZONE 'utc') - (interval '1 millisecond' * ${leaseMs}::double precision)
-             )
-           )
-        ORDER BY "createdAt"
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-     )
-    RETURNING *`;
+  const now = new Date();
 
-  return rows[0] ?? null;
+  // Repeated verbatim in the UPDATE below -- that repetition *is* the compare-and-swap.
+  const claimable = {
+    OR: [
+      { status: GENERATION_STATUS.PENDING },
+      { status: GENERATION_STATUS.GENERATING, lockedAt: null },
+      { status: GENERATION_STATUS.GENERATING, lockedAt: { lt: new Date(now.getTime() - leaseMs) } },
+    ],
+  };
+
+  const candidates = await prisma.quizGeneration.findMany({
+    where: claimable,
+    orderBy: { createdAt: 'asc' },
+    take: CLAIM_CANDIDATES,
+    select: { id: true, startedAt: true },
+  });
+
+  for (const candidate of candidates) {
+    const { count } = await prisma.quizGeneration.updateMany({
+      where: { id: candidate.id, ...claimable },
+      data: {
+        status: GENERATION_STATUS.GENERATING,
+        lockedAt: now,
+        lockedBy: workerId,
+        // Stands in for the old SQL COALESCE: a reclaimed job keeps the moment it first started.
+        ...(candidate.startedAt ? {} : { startedAt: now }),
+      },
+    });
+
+    // Re-read rather than trust the candidate: callers expect the full, current row, which is what
+    // `RETURNING *` gave them.
+    if (count === 1) return prisma.quizGeneration.findUnique({ where: { id: candidate.id } });
+  }
+
+  return null;
 }
 
 function requestFromJob(job) {

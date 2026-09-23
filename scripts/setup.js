@@ -88,12 +88,20 @@ Please add your API keys / database configuration:
             await waitForEnter();
         }
 
-        console.log("\nRunning Prisma migrations...");
+        console.log("\nGenerating the Prisma client for your database...");
 
-        run(
-            "npx prisma migrate dev",
-            path.join(root, "backend")
-        );
+        // Both of these read DATABASE_URL and pick the matching schema, so they work whether you
+        // filled in a Postgres URL or a SQLite file path. The generate is not optional: npm install
+        // already generated a client, but against the default (Postgres) schema, and Prisma ships a
+        // separate query engine per provider -- a SQLite install needs this to reach its own database.
+        run("npm run db:generate", path.join(root, "backend"));
+
+        console.log("\nApplying database migrations...");
+
+        // `migrate deploy`, not `migrate dev`: deploy applies the migrations that ship with the repo,
+        // whereas dev wants to author new ones and needs a shadow database -- which on Postgres means
+        // the CREATEDB privilege a fresh install has usually not been granted.
+        run("npm run db:deploy", path.join(root, "backend"));
 
         console.log("\nSeeding database...");
 
@@ -112,7 +120,18 @@ Start QuizzApp with:
     npm run dev
 `);
     } catch (error) {
-        console.error("\nSetup failed.");
+        // Print what actually broke. This used to say only "Setup failed.", which left the most
+        // common failure -- a DATABASE_URL still holding the example <user>:<password> placeholders
+        // -- looking like a bug in the installer rather than a value the reader still has to fill in.
+        console.error(`\nSetup failed while running: ${error.cmd || "a setup step"}`);
+        console.error(error.message);
+        console.error(`
+Common causes:
+
+  - backend/.env still has the example DATABASE_URL, with <user>:<password> placeholders.
+  - Using Postgres, but the server is not running or the database does not exist yet.
+  - A password containing characters that need percent-encoding ("@" -> "%40").
+`);
         process.exit(1);
     }
 }

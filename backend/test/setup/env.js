@@ -1,9 +1,9 @@
 // Runs before config/env.js's `import 'dotenv/config'` resolves anywhere else in the module
 // graph (Vitest guarantees setupFiles run before a test file's own imports). Loading dotenv
-// here first lets us read the real DATABASE_URL from .env and layer `?schema=test` onto it --
-// isolating test data into its own Postgres schema inside the same database, no second
-// database needed. dotenv does NOT overwrite already-set process.env keys, so setting
-// AI_PROVIDER/JWT_SECRET here means the real .env file's values are skipped for those two.
+// here first lets us read the real DATABASE_URL from .env and point it at the test database --
+// a `test` schema inside the same Postgres database, or a separate file on SQLite, so neither
+// engine needs a second DATABASE_URL. dotenv does NOT overwrite already-set process.env keys,
+// so setting AI_PROVIDER/JWT_SECRET here means the real .env file's values are skipped for those two.
 import 'dotenv/config';
 import { testDatabaseUrl } from './testDatabaseUrl.js';
 

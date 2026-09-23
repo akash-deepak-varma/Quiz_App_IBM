@@ -4,8 +4,9 @@ export default defineConfig({
   test: {
     globalSetup: ['./test/setup/globalSetup.js'],
     setupFiles: ['./test/setup/env.js'],
-    // All test files share the same Postgres "test" schema and truncate the same tables
-    // between runs (see test/setup -- resetDb), so they can't run concurrently.
+    // Test files share one database -- a "test" schema on Postgres, a separate test.db file on
+    // SQLite -- and clear the same tables between runs (test/setup/resetDb.js), so they cannot run
+    // concurrently. It is also what SQLite wants regardless: one writer at a time.
     fileParallelism: false,
   },
 });
