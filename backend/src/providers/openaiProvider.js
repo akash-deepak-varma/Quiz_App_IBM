@@ -1,5 +1,4 @@
 import OpenAI from 'openai';
-import { env } from '../config/env.js';
 import { TruncatedResponseError } from '../lib/errors.js';
 import {
   extractJsonFromText,
@@ -23,33 +22,43 @@ export const capabilities = {
   maxOutputTokens: MAX_TOKENS,
 };
 
-let client;
+// One client per resolved runtime config object. See the long comment in claudeProvider.js for why
+// this is a WeakMap keyed on the object rather than a process-wide memo or a credential-keyed Map.
+const clients = new WeakMap();
 
-function getClient() {
+function getClient(runtime) {
+  if (!runtime?.apiKey) {
+    throw new Error('openaiProvider requires a resolved AI runtime config with an apiKey');
+  }
+
+  let client = clients.get(runtime);
   if (!client) {
     client = new OpenAI({
-      baseURL: env.openai.baseURL,
-      apiKey: env.openai.apiKey,
-      timeout: env.aiProviderTimeoutMs,
-      maxRetries: env.aiProviderMaxRetries,
+      baseURL: runtime.baseUrl ?? undefined,
+      apiKey: runtime.apiKey,
+      timeout: runtime.timeoutMs,
+      maxRetries: runtime.maxRetries,
+      // Re-validates every outgoing URL and refuses redirects -- see validation/aiEndpoint.js.
+      fetch: runtime.fetch,
     });
+    clients.set(runtime, client);
   }
   return client;
 }
 
-async function complete(system, user) {
+async function complete(system, user, runtime) {
   const startedAt = Date.now();
 
   try {
     console.log('[AI] Starting OpenAI request', {
-      model: env.openai.model,
-      timeoutMs: env.aiProviderTimeoutMs,
-      maxRetries: env.aiProviderMaxRetries,
+      model: runtime.model,
+      timeoutMs: runtime.timeoutMs,
+      maxRetries: runtime.maxRetries,
       promptLength: user.length,
     });
 
-    const response = await getClient().chat.completions.create({
-      model: env.openai.model,
+    const response = await getClient(runtime).chat.completions.create({
+      model: runtime.model,
       max_tokens: MAX_TOKENS,
       messages: [
         { role: 'system', content: system },
@@ -98,30 +107,47 @@ async function complete(system, user) {
   }
 }
 
-export async function generateQuiz(params) {
+export async function generateQuiz(params, runtime) {
   const { system, user } = buildQuizGenerationPrompt(params);
-  const { text, usage } = await complete(system, user);
+  const { text, usage } = await complete(system, user, runtime);
 
   return { ...extractJsonFromText(text), usage };
 }
 
-export async function gradeShortAnswer(params) {
+export async function gradeShortAnswer(params, runtime) {
   const { system, user } = buildGradeShortAnswerPrompt(params);
-  const { text } = await complete(system, user);
+  const { text } = await complete(system, user, runtime);
 
   return extractJsonFromText(text);
 }
 
-export async function gradeCode(params) {
+export async function gradeCode(params, runtime) {
   const { system, user } = buildGradeCodePrompt(params);
-  const { text } = await complete(system, user);
+  const { text } = await complete(system, user, runtime);
 
   return extractJsonFromText(text);
 }
 
-export async function explainMistake(params) {
+export async function explainMistake(params, runtime) {
   const { system, user } = buildExplainMistakePrompt(params);
-  const { text } = await complete(system, user);
+  const { text } = await complete(system, user, runtime);
 
   return extractJsonFromText(text);
+}
+
+/** See claudeProvider.ping -- same contract, same reasoning for using a tiny completion. */
+export async function ping(_params, runtime) {
+  const startedAt = Date.now();
+
+  const response = await getClient(runtime).chat.completions.create({
+    model: runtime.model,
+    max_tokens: 4,
+    messages: [{ role: 'user', content: 'ping' }],
+  });
+
+  return {
+    model: runtime.model,
+    latencyMs: Date.now() - startedAt,
+    stopReason: response.choices?.[0]?.finish_reason ?? null,
+  };
 }

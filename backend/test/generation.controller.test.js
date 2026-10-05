@@ -5,13 +5,7 @@ import { prisma } from '../src/lib/prismaClient.js';
 import { runOneJob, claimNextJob } from '../src/services/generation/worker.js';
 import * as mockProvider from '../src/providers/mockProvider.js';
 import { resetDb } from './setup/resetDb.js';
-
-async function signup(email) {
-  const res = await request(app)
-    .post('/api/auth/signup')
-    .send({ name: 'Test User', email, password: 'supersecret' });
-  return res.body.token;
-}
+import { signupUser as signup } from './setup/signup.js';
 
 function enqueue(token, body) {
   return request(app).post('/api/quiz/generations').set('Authorization', `Bearer ${token}`).send(body);
@@ -20,6 +14,36 @@ function enqueue(token, body) {
 describe('POST /api/quiz/generations', () => {
   beforeEach(resetDb);
   afterEach(() => vi.restoreAllMocks());
+
+  // The pre-flight exists so "I forgot to add my key" is a 400 on this request, rather than a
+  // queued job that fails a second later with nobody watching.
+  it('rejects a real-provider request from a user with no saved key, without queueing anything', async () => {
+    const token = await signup('async-nokey@example.com');
+
+    const res = await enqueue(token, {
+      topic: 'Needs a key',
+      numQuestions: 2,
+      typeMix: ['true_false'],
+      provider: 'claude',
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/No API key is saved/);
+    expect(await prisma.quizGeneration.count()).toBe(0);
+  });
+
+  it('still accepts a mock request from a user with no saved key', async () => {
+    const token = await signup('async-mockok@example.com');
+
+    const res = await enqueue(token, {
+      topic: 'No key needed',
+      numQuestions: 2,
+      typeMix: ['true_false'],
+      provider: 'mock',
+    });
+
+    expect(res.status).toBe(202);
+  });
 
   it('returns 202 with a job id instead of waiting for the quiz', async () => {
     const token = await signup('async-enqueue@example.com');
@@ -150,6 +174,36 @@ describe('the generation worker', () => {
     expect(job.failureReason).toContain('gateway exploded');
     expect(job.finishedAt).toBeTruthy();
     expect(await prisma.quiz.count()).toBe(0);
+  });
+
+  // Credentials are live-loaded from the job's owner at execution time. If the owner's config has
+  // gone away since the job was enqueued, the job must fail with something the learner can act on,
+  // and must not burn its attempt budget retrying a condition it cannot affect.
+  it('fails a job whose owner has no usable AI config, and does not retry it', async () => {
+    const token = await signup('async-noconfig@example.com');
+    const user = await prisma.user.findUnique({ where: { email: 'async-noconfig@example.com' } });
+
+    // Enqueue a mock job (which needs no credentials), then rewrite it to claude directly --
+    // standing in for a user who had a key when they pressed Generate and removed it afterwards.
+    // The controller's own pre-flight would reject this at request time, which is the point of it.
+    const { body } = await enqueue(token, { topic: 'Orphaned', numQuestions: 2, typeMix: ['true_false'] });
+    await prisma.quizGeneration.update({
+      where: { id: body.generationId },
+      data: { provider: 'claude' },
+    });
+    expect(await prisma.userAiConfig.count({ where: { userId: user.id } })).toBe(0);
+
+    const outcome = await runOneJob();
+
+    expect(outcome.status).toBe('FAILED');
+    const job = await prisma.quizGeneration.findUnique({ where: { id: body.generationId } });
+    expect(job).toMatchObject({ status: 'FAILED', failureCategory: 'AI_CONFIG_MISSING' });
+    expect(job.failureReason).toMatch(/No API key is saved/);
+    expect(await prisma.quiz.count()).toBe(0);
+
+    // A FAILED job matches no branch of claimNextJob's claimable predicate, so there is nothing
+    // left to pick up -- the retry ladder is never even reached.
+    expect(await runOneJob()).toBeNull();
   });
 
   // Half-generated work used to be unreachable: a crashed request left nothing behind at all.

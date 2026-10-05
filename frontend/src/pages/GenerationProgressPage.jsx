@@ -27,7 +27,10 @@ const FAILURE_MESSAGES = {
   PROVIDER_TIMEOUT: 'The AI provider took too long to respond. Trying again usually works.',
   PROVIDER_5XX: 'The AI provider had a problem on its side. Trying again usually works.',
   NETWORK_ERROR: 'We could not reach the AI provider. Check your connection and try again.',
-  PROVIDER_4XX: 'The AI provider rejected the request. Check the provider configuration before retrying.',
+  PROVIDER_4XX:
+    'The AI provider rejected the request. Check your endpoint, model and key in AI Settings before retrying.',
+  AI_CONFIG_MISSING:
+    'Your AI settings need attention. Open AI Settings to add or re-enter your API key, then try again.',
   OUTPUT_TRUNCATED: 'The AI kept running out of room. Try fewer questions, or split the topic in two.',
   PARSE_ERROR: 'The AI did not return usable questions this time. Trying again usually works.',
   SCHEMA_INVALID: 'The AI did not return usable questions this time. Trying again usually works.',
@@ -137,12 +140,21 @@ export default function GenerationProgressPage() {
         {failed ? (
           <>
             <ErrorBanner message={FAILURE_MESSAGES[job.failureCategory] ?? DEFAULT_FAILURE_MESSAGE} />
-            <Link
-              to="/"
-              className="inline-block rounded bg-slate-800 px-4 py-2 text-white hover:bg-slate-700"
-            >
-              Try again
-            </Link>
+            <div className="flex flex-wrap items-center gap-4">
+              <Link
+                to="/"
+                className="inline-block rounded bg-slate-800 px-4 py-2 text-white hover:bg-slate-700"
+              >
+                Try again
+              </Link>
+              {/* The copy for these two names a destination, so make it clickable rather than
+                  leaving the learner to find the page themselves. */}
+              {(job.failureCategory === 'AI_CONFIG_MISSING' || job.failureCategory === 'PROVIDER_4XX') && (
+                <Link to="/settings/ai" className="text-sm text-slate-600 underline hover:text-slate-800">
+                  Open AI Settings
+                </Link>
+              )}
+            </div>
           </>
         ) : (
           <>

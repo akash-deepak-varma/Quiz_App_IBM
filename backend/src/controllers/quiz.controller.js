@@ -6,6 +6,7 @@ import { recordActivityAndGetStreak } from '../services/streakService.js';
 import { evaluateAndAwardBadges } from '../services/badgeService.js';
 import { computeAttemptXP } from '../services/leaderboardService.js';
 import { materializeQuiz } from '../services/quizMaterializationService.js';
+import { resolveAiConfig, gradingProviderFor } from '../services/aiConfigService.js';
 import { mapWithConcurrency } from '../services/generation/pool.js';
 import { toJsonOrNull, fromJsonOrNull } from '../lib/serialization.js';
 import { BadRequestError, ConflictError, NotFoundError } from '../lib/errors.js';
@@ -27,6 +28,7 @@ export async function generate(req, res, next) {
       numQuestions,
       typeMix,
       provider,
+      userId: req.user.id,
     });
 
     const quiz = await materializeQuiz({
@@ -104,7 +106,34 @@ export async function submit(req, res, next) {
     }
 
     const answerByQuestionId = new Map(answers.map((a) => [a.questionId, a.userAnswer]));
-    const provider = getProvider(quiz.providerUsed);
+
+    // Grading only reaches the provider for short_answer, and for code questions whose exact match
+    // failed. Resolving credentials unconditionally would 400 a pure-MCQ submission from someone
+    // who has since removed their key -- so the resolve is conditional on this quiz actually
+    // containing a type that can need one.
+    //
+    // Known residual edge, stated rather than hidden: a quiz with code questions answered exactly
+    // correctly still resolves, and so still 400s for a user with no key, even though no provider
+    // call would have happened. Fixing that properly means making scoreAnswer resolve lazily after
+    // the exact-match pass, which changes quizScoringService's signature and belongs in its own
+    // change. It must NOT be "fixed" by falling back to mock: scoreExactMatch throws for
+    // short_answer, and mockProvider.gradeShortAnswer scores free text on keyword matching, which
+    // would hand out quietly wrong marks.
+    const needsProvider = quiz.questions.some(
+      (q) => q.type === 'short_answer' || q.type === 'code_completion' || q.type === 'debug'
+    );
+
+    let provider;
+    if (needsProvider) {
+      const resolved = await resolveAiConfig({
+        userId: req.user.id,
+        requestedProvider: gradingProviderFor(quiz.providerUsed),
+      });
+      provider = getProvider(resolved.provider, resolved.runtime);
+    } else {
+      // Nothing in this quiz can call the provider, so which one it is cannot matter.
+      provider = getProvider('mock');
+    }
 
     // Iterate the quiz's own question list, not the client-submitted answers -- otherwise
     // a client could omit a question entirely and have it silently excluded from the
@@ -260,6 +289,7 @@ export async function regenerateQuestion(req, res, next) {
       numQuestions: 1,
       typeMix: [question.type],
       provider: quiz.providerUsed,
+      userId: req.user.id,
     });
     const regenerated = rawQuiz.questions[0];
 

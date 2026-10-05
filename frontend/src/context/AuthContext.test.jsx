@@ -4,7 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { AuthProvider, useAuth } from './AuthContext.jsx';
 import { apiFetch } from '../api/client.js';
 
-vi.mock('../api/client.js', () => ({ apiFetch: vi.fn() }));
+// setUnauthorizedHandler must be present: AuthProvider registers its logout through it in an
+// effect, and an undefined import would throw on mount.
+vi.mock('../api/client.js', () => ({ apiFetch: vi.fn(), setUnauthorizedHandler: vi.fn() }));
 
 function Probe() {
   const { user, isAuthenticated, login, logout } = useAuth();

@@ -18,6 +18,12 @@ export class UnauthorizedError extends HttpError {
   }
 }
 
+export class ForbiddenError extends HttpError {
+  constructor(message = 'Forbidden') {
+    super(message, 403);
+  }
+}
+
 export class NotFoundError extends HttpError {
   constructor(message = 'Not found') {
     super(message, 404);
@@ -27,6 +33,50 @@ export class NotFoundError extends HttpError {
 export class ConflictError extends HttpError {
   constructor(message = 'Conflict') {
     super(message, 409);
+  }
+}
+
+// The three AI-configuration errors below each carry `failureCategory`, which
+// services/generation/failureCategory.js#classifyError reads as a pre-classification hook (it
+// validates the string against its own map before deriving a category from the error shape).
+//
+// The string is a literal rather than an import on purpose: failureCategory.js already imports
+// TruncatedResponseError from this file, so importing FAILURE_CATEGORIES back would be a cycle. A
+// typo therefore degrades silently to UNKNOWN -- which is exactly why a test pins these literals.
+//
+// They are all 400s rather than 500s: nothing is broken on the server, the user has to change a
+// setting. And they are all one category, because the remedy is the same page in every case.
+const AI_CONFIG_MISSING = 'AI_CONFIG_MISSING';
+
+/**
+ * A user-configured AI endpoint failed validation (bad scheme, private/metadata address, redirect).
+ */
+export class UnsafeEndpointError extends BadRequestError {
+  constructor(message = 'API endpoint is not allowed') {
+    super(message);
+    this.failureCategory = AI_CONFIG_MISSING;
+  }
+}
+
+/** The user has saved no usable credentials for the provider they are trying to use. */
+export class MissingAiConfigError extends BadRequestError {
+  constructor(provider) {
+    super(
+      `No API key is saved for "${provider}". Open AI Settings to add one, or generate with the mock provider instead.`
+    );
+    this.failureCategory = AI_CONFIG_MISSING;
+  }
+}
+
+/**
+ * The stored ciphertext could not be decrypted -- a rotated ENCRYPTION_KEY, a tampered row, or a
+ * row copied between users. Deliberately actionable: the only fix is to paste the key again, so the
+ * message says that rather than "something went wrong".
+ */
+export class AiConfigUnreadableError extends BadRequestError {
+  constructor() {
+    super('Your saved AI key could not be read. Please re-enter it in AI Settings.');
+    this.failureCategory = AI_CONFIG_MISSING;
   }
 }
 

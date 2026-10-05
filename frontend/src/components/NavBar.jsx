@@ -7,6 +7,7 @@ const LINKS = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/leaderboard', label: 'Leaderboard' },
   { to: '/badges', label: 'Badges' },
+  { to: '/settings/ai', label: 'AI Settings' },
 ];
 
 export default function NavBar() {

@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { prisma } from '../src/lib/prismaClient.js';
 import { hashPassword } from '../src/services/authService.js';
 import * as mockProvider from '../src/providers/mockProvider.js';
@@ -30,7 +31,7 @@ const BADGES = [
 const DEMO_USER = { name: 'Demo User', email: 'demo@example.com', password: 'demopass123' };
 const DEMO_QUIZ_TOPIC = 'JavaScript Basics';
 
-async function seedOrg() {
+export async function seedOrg() {
   let org = await prisma.org.findFirst();
   if (!org) {
     org = await prisma.org.create({ data: { name: 'Default Org' } });
@@ -41,7 +42,7 @@ async function seedOrg() {
   return org;
 }
 
-async function seedBadges() {
+export async function seedBadges() {
   for (const badge of BADGES) {
     const existing = await prisma.badge.findFirst({ where: { name: badge.name } });
     if (existing) continue;
@@ -170,11 +171,20 @@ async function main() {
   await seedSampleAttempt(demoUser, quiz);
 }
 
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+// Guarded so that importing this file for one of its exported helpers does not also create the
+// demo account. scripts/seedBadges.mjs imports `seedOrg`/`seedBadges` to seed a *production*
+// database with the badge reference rows only -- `main()` additionally creates
+// demo@example.com with a well-known password, which must never exist on a public deployment.
+const invokedDirectly =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (invokedDirectly) {
+  main()
+    .catch((err) => {
+      console.error(err);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

@@ -24,6 +24,7 @@ const DELETE_ORDER = [
   'quiz', // -> user, topic
   'tag', // <-> topic (implicit join table)
   'topic',
+  'userAiConfig', // -> user (CASCADE, but listed anyway: this list is the convention)
   'user', // -> org
   'org',
 ];

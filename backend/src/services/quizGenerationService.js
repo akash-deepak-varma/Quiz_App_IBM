@@ -3,6 +3,7 @@ import { QuizGenerationFailedError } from '../lib/errors.js';
 import { buildGenerationPlan } from './generation/planner.js';
 import { runGeneration, GENERATION_STATUS } from './generation/orchestrator.js';
 import { createMemoryStore } from './generation/stores.js';
+import { resolveAiConfig } from './aiConfigService.js';
 
 /**
  * Synchronous quiz generation.
@@ -17,7 +18,14 @@ import { createMemoryStore } from './generation/stores.js';
  * reason to exist (`POST /api/quiz/generations`).
  */
 export async function generateValidatedQuiz(params) {
-  const provider = getProvider(params.provider);
+  // `params.userId` is how credentials reach this path: resolveAiConfig loads and decrypts the
+  // requesting user's own key. A caller that passes `provider: 'mock'` needs no userId at all,
+  // which is why every mock-based test fixture still works untouched.
+  const { provider: providerName, runtime } = await resolveAiConfig({
+    userId: params.userId,
+    requestedProvider: params.provider,
+  });
+  const provider = getProvider(providerName, runtime);
   const plan = buildGenerationPlan(params);
   const store = createMemoryStore();
 

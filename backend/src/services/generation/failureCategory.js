@@ -17,6 +17,10 @@ export const FAILURE_CATEGORIES = {
   PARSE_ERROR: 'PARSE_ERROR',
   SCHEMA_INVALID: 'SCHEMA_INVALID',
   CANCELLED: 'CANCELLED',
+  // The user's AI configuration is missing, unreadable, or names an endpoint that is not allowed.
+  // Distinct from PROVIDER_4XX because the fix is on the AI Settings page, not in the request --
+  // which is why the frontend copy for it links there.
+  AI_CONFIG_MISSING: 'AI_CONFIG_MISSING',
   UNKNOWN: 'UNKNOWN',
 };
 
@@ -36,9 +40,19 @@ export function isTransient(category) {
   return TRANSIENT.has(category);
 }
 
-/** A 4xx that is not a rate limit is a request defect -- retrying it cannot help. */
+/**
+ * A 4xx that is not a rate limit is a request defect; a cancellation is a decision; a missing or
+ * unusable AI configuration is a setting only the user can change. Retrying any of them cannot
+ * help, so the ladder must not spend its attempt budget on them.
+ */
+const NON_RETRYABLE = new Set([
+  FAILURE_CATEGORIES.PROVIDER_4XX,
+  FAILURE_CATEGORIES.CANCELLED,
+  FAILURE_CATEGORIES.AI_CONFIG_MISSING,
+]);
+
 export function isRetryable(category) {
-  return category !== FAILURE_CATEGORIES.PROVIDER_4XX && category !== FAILURE_CATEGORIES.CANCELLED;
+  return !NON_RETRYABLE.has(category);
 }
 
 const TIMEOUT_NAMES = new Set(['APIConnectionTimeoutError', 'AbortError', 'TimeoutError']);

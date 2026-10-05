@@ -8,6 +8,7 @@ export default function SignupPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -16,7 +17,7 @@ export default function SignupPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await signup(name, email, password);
+      await signup(name, email, password, inviteCode);
       navigate('/');
     } catch (err) {
       setError(err.message);
@@ -61,6 +62,17 @@ export default function SignupPage() {
             className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
           />
           <p className="mt-1 text-xs text-slate-400">At least 8 characters.</p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Invite code</label>
+          <input
+            type="text"
+            required
+            value={inviteCode}
+            onChange={(e) => setInviteCode(e.target.value)}
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
+          />
+          <p className="mt-1 text-xs text-slate-400">Ask whoever shared this app with you.</p>
         </div>
         <button
           type="submit"
