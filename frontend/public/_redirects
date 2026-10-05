@@ -1,0 +1,7 @@
+# Single-page-app fallback.
+#
+# The router is BrowserRouter, so /dashboard and /settings/ai exist only in the browser -- there is
+# no file at those paths. Without this rule a hard refresh or a shared link 404s on any static host.
+# Honoured by Render Static Sites, Netlify and Cloudflare Pages. (Render can also express this as a
+# `routes:` rewrite in render.yaml; this file makes the project portable between all three.)
+/*  /index.html  200

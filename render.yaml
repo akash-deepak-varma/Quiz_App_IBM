@@ -1,0 +1,152 @@
+# Render Blueprint: the API, the SPA, and nothing else.
+#
+# The database is deliberately NOT declared here. Render's own free Postgres expires after 30 days;
+# Neon's free tier does not. Keeping DATABASE_URL as a pasted secret also lets Neon's *two* URLs
+# both be supplied -- pooled for the running app, direct for migrations -- which a Render-managed
+# database could not express.
+#
+# Before the first deploy, see the deployment checklist in README.md. In particular:
+#   - generate ENCRYPTION_KEY yourself (see the note on that env var below)
+#   - run `npm run seed:badges` once against the direct URL, or the Badges page stays empty forever
+
+services:
+  - type: web
+    name: quizapp-ica-api
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: backend
+
+    # Migrations run in the build, not the start command: a failed migration then fails the build and
+    # the broken release is never swapped in. Render's free plan has no pre-deploy command (that is a
+    # paid feature), and migrating in startCommand would restart-loop instead.
+    #
+    # Two details that will otherwise bite:
+    #   --include=dev   : `prisma` (the CLI) is a devDependency, and Render sets NODE_ENV=production,
+    #                     which makes plain `npm ci` skip dev deps -- so this would fail with
+    #                     "prisma: not found".
+    #   DIRECT_DATABASE_URL : Prisma Migrate takes advisory locks and keeps session state, neither of
+    #                     which survives PgBouncer's transaction pooling. The app uses the pooled URL;
+    #                     the migration step must not.
+    #
+    # scripts/prisma.mjs picks the schema from the URL's scheme, so no --schema flag is needed.
+    buildCommand: >-
+      npm ci --include=dev &&
+      node scripts/prisma.mjs generate &&
+      DATABASE_URL="$DIRECT_DATABASE_URL" node scripts/prisma.mjs migrate deploy
+    startCommand: npm start
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: NODE_VERSION
+        value: "24" # matches .github/workflows/tests.yml
+      - key: NODE_ENV
+        value: production
+      # Render terminates TLS at its edge and forwards X-Forwarded-For. Without this, req.ip is the
+      # proxy and the IP-keyed auth limiter treats every caller as one client.
+      - key: TRUST_PROXY
+        value: "1"
+
+      # ---- secrets: paste these in the Render dashboard, never commit them -------------------
+      # Neon POOLED url. Needs ?sslmode=require&pgbouncer=true -- without pgbouncer=true,
+      # Prisma 5 against PgBouncer in transaction mode can throw
+      # 'prepared statement "s0" already exists' under concurrency.
+      - key: DATABASE_URL
+        sync: false
+      # Neon DIRECT url (same host without "-pooler"). Used by the migrate step above only.
+      - key: DIRECT_DATABASE_URL
+        sync: false
+      # 32+ random bytes, fresh for production -- not the value from your local .env.
+      - key: JWT_SECRET
+        sync: false
+      # MUST be base64 of exactly 32 bytes, or the server refuses to boot. Do NOT use Render's
+      # `generateValue: true` here: it produces a random string in its own format, which
+      # assertEncryptionKeyConfigured() will reject. Generate it with:
+      #   node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+      # LOSING THIS MAKES EVERY SAVED API KEY UNREADABLE -- keep a copy in a password manager.
+      - key: ENCRYPTION_KEY
+        sync: false
+      # The shared code your friends type on the signup form. Treat it as a password.
+      - key: SIGNUP_INVITE_CODE
+        sync: false
+      # ---------------------------------------------------------------------------------------
+
+      # Exact scheme, no trailing slash. Must match the static site's URL below once Render
+      # assigns it (chicken-and-egg: deploy the frontend first to learn the URL, or set this
+      # afterwards and redeploy).
+      - key: CORS_ORIGINS
+        value: https://quizapp-ica-web.onrender.com
+
+      # The two switches that must stay off in production. The first is what guarantees two users
+      # can never spend the same API key; the second is what keeps a user-supplied endpoint from
+      # reaching http:// or loopback addresses. config/env.js refuses to boot if the second is true
+      # here, and warns about the first.
+      - key: AI_ALLOW_ENV_FALLBACK
+        value: "false"
+      - key: AI_ALLOW_INSECURE_ENDPOINTS
+        value: "false"
+
+      # Only the default for a user who has saved nothing; each user picks their own in AI Settings.
+      - key: AI_PROVIDER
+        value: mock
+
+      # The in-process generation worker is the entire generation path on a single free instance.
+      # When the instance sleeps the worker stops, but a job left GENERATING is reclaimed after its
+      # lease expires and resumes from the questions already staged -- a cloud sleep is just a slow
+      # crash, which the worker was already built to survive.
+      - key: GENERATION_WORKER_ENABLED
+        value: "true"
+      - key: GENERATION_LEASE_MS
+        value: "120000"
+
+      - key: AI_PROVIDER_TIMEOUT_MS
+        value: "60000"
+      - key: QUIZ_GENERATE_RATE_LIMIT
+        value: "20"
+      - key: EXPLAIN_RATE_LIMIT
+        value: "30"
+      - key: AI_CONFIG_TEST_RATE_LIMIT
+        value: "10"
+      - key: AUTH_RATE_LIMIT
+        value: "20"
+
+  - type: web
+    runtime: static
+    name: quizapp-ica-web
+    rootDir: frontend
+    # --include=dev for the same reason the API service needs it: vite, @vitejs/plugin-react,
+    # tailwindcss, postcss and autoprefixer are ALL devDependencies, and Render sets
+    # NODE_ENV=production, which makes a plain `npm ci` skip them -- the build then dies with
+    # "vite: not found". Vite's `build` emits a production bundle regardless of NODE_ENV, so
+    # installing dev deps costs nothing but a few build seconds.
+    #
+    # No `plan:` key here: static sites have no tier, and it is not a documented field for
+    # runtime: static.
+    buildCommand: npm ci --include=dev && npm run build
+    staticPublishPath: dist
+
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      # Baked into the bundle at build time by Vite, not read at runtime -- changing it needs a
+      # redeploy, not a restart. The /api suffix is part of the value: api/client.js concatenates
+      # paths straight onto it.
+      - key: VITE_API_BASE_URL
+        value: https://quizapp-ica-api.onrender.com/api
+
+    # These belong here rather than on the API: this is the service that actually serves HTML.
+    # HSTS already comes from Render's edge for *.onrender.com.
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+
+    # BrowserRouter has no server-side routes, so every deep link must fall back to index.html.
+    # frontend/public/_redirects says the same thing, for portability to Netlify/Cloudflare Pages.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

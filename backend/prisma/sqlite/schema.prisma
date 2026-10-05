@@ -34,6 +34,53 @@ model User {
   badges       UserBadge[]
   favorites    Favorite[]
   generations  QuizGeneration[]
+  aiConfig     UserAiConfig?
+}
+
+/// Each user's own AI provider credentials. 1:1 with User, because a prototype needs one active
+/// configuration per person, not a library of them -- and `userId @unique` is what makes "load the
+/// config for this user" a single indexed lookup from both the HTTP path and the generation worker.
+///
+/// `provider` is a String validated against constants/enums.js AI_PROVIDERS rather than an enum,
+/// which keeps this model replayable on SQLite (see scripts/syncSqliteSchema.mjs).
+model UserAiConfig {
+  /// `userId` is the primary key, the same shape as Streak: there is nothing to say about a user
+  /// twice, and a surrogate id plus a unique index would add a column no query needs.
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id])
+
+  /// 'mock' | 'claude' | 'openai' -- validated against constants/enums.js AI_PROVIDERS. Means
+  /// "the provider these credentials are for", which is also the user's default provider: one row
+  /// holds one provider's credentials, and switching provider replaces them.
+  provider String @default("mock")
+
+  /// null means "use the provider SDK's own default". A non-null baseUrl is validated by
+  /// validation/aiEndpoint.js on save, on test, and again on every outbound call.
+  baseUrl String?
+  model   String?
+
+  /// AES-256-GCM, packed as "v1.<iv>.<tag>.<ciphertext>" by lib/apiKeyCrypto.js and bound to
+  /// `userId` as additional authenticated data. One column rather than three: GCM's three parts are
+  /// only meaningful together, so three columns would invite a partial write that produces a row
+  /// which is syntactically fine and cryptographically undecryptable. null means no key saved yet.
+  apiKeyCipher String?
+
+  /// The "v1" prefix inside apiKeyCipher is what decryptApiKey actually checks and is
+  /// authoritative. This column exists so a future rotation can *find* the rows still needing
+  /// re-encryption with a query instead of parsing every ciphertext.
+  keyVersion Int @default(1)
+
+  /// Last "Test Connection" result, so the settings page can tell a never-tested config from one
+  /// that failed. Written only when the test used the *saved* key -- testing unsaved form values
+  /// must not rewrite the row.
+  lastTestedAt   DateTime?
+  lastTestStatus String? // OK | FAILED
+  lastTestDetail String? // the same sanitized copy the endpoint returned, capped at 200 chars
+
+  createdAt DateTime @default(now())
+  /// @default alongside @updatedAt so the hand-written DDL (NOT NULL DEFAULT CURRENT_TIMESTAMP) is
+  /// exactly what Prisma would generate, keeping a future `migrate diff` quiet.
+  updatedAt DateTime @updatedAt @default(now())
 }
 
 model Topic {

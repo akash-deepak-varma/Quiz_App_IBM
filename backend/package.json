@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
@@ -18,6 +21,7 @@
     "prisma:migrate": "node scripts/prisma.mjs migrate dev",
     "prisma:generate": "node scripts/prisma.mjs generate",
     "seed": "node prisma/seed.js",
+    "seed:badges": "node scripts/seedBadges.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

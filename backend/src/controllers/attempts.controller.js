@@ -2,6 +2,7 @@ import { prisma } from '../lib/prismaClient.js';
 import { fromJsonOrNull } from '../lib/serialization.js';
 import { NotFoundError, BadRequestError } from '../lib/errors.js';
 import { getProvider } from '../providers/index.js';
+import { resolveAiConfig, gradingProviderFor } from '../services/aiConfigService.js';
 
 export async function getAttempt(req, res, next) {
   try {
@@ -48,7 +49,14 @@ export async function explainMistake(req, res, next) {
     }
 
     const { question, attempt } = answerLog;
-    const provider = getProvider(attempt.quiz.providerUsed);
+
+    // Explain always calls the provider, so credentials are resolved unconditionally. A user with
+    // no saved key gets a 400 whose message the results page already renders inline.
+    const resolved = await resolveAiConfig({
+      userId: req.user.id,
+      requestedProvider: gradingProviderFor(attempt.quiz.providerUsed),
+    });
+    const provider = getProvider(resolved.provider, resolved.runtime);
     const { explanation } = await provider.explainMistake({
       type: question.type,
       prompt: question.prompt,

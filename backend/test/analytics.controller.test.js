@@ -3,13 +3,7 @@ import request from 'supertest';
 import { app } from '../src/app.js';
 import { prisma } from '../src/lib/prismaClient.js';
 import { resetDb } from './setup/resetDb.js';
-
-async function signup(email) {
-  const res = await request(app)
-    .post('/api/auth/signup')
-    .send({ name: 'Test User', email, password: 'supersecret' });
-  return res.body.token;
-}
+import { signupUser as signup } from './setup/signup.js';
 
 async function generateQuiz(token, topic) {
   const res = await request(app)

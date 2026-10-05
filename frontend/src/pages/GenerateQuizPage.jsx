@@ -1,11 +1,10 @@
-import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api/client.js';
 import { ErrorBanner } from '../components/AsyncState.jsx';
 
 const DIFFICULTIES = ['beginner', 'intermediate', 'advanced'];
 const QUESTION_TYPES = ['mcq', 'code_completion', 'debug', 'short_answer', 'ordering', 'true_false'];
-const PROVIDERS = ['mock', 'claude', 'openai'];
 
 const TYPE_LABELS = {
   mcq: 'Multiple choice',
@@ -28,9 +27,20 @@ export default function GenerateQuizPage() {
   const [difficulty, setDifficulty] = useState('beginner');
   const [numQuestions, setNumQuestions] = useState(5);
   const [typeMix, setTypeMix] = useState([]);
-  const [provider, setProvider] = useState('mock');
+  // Provider is a saved preference now (AI Settings), not a per-request choice. The only override
+  // worth keeping is "don't spend my quota on this one", which is what useMock is.
+  const [aiConfig, setAiConfig] = useState(null);
+  const [useMock, setUseMock] = useState(false);
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Never blocks the form: if this fails (a cold backend, say), the checkbox below still works and
+  // the submit's own error reporting handles whatever goes wrong.
+  useEffect(() => {
+    apiFetch('/me/ai-config')
+      .then(setAiConfig)
+      .catch(() => setAiConfig(null));
+  }, []);
 
   const toggleType = (type) => {
     setTypeMix((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]));
@@ -52,7 +62,9 @@ export default function GenerateQuizPage() {
           difficulty,
           numQuestions: Number(numQuestions),
           typeMix: typeMix.length > 0 ? typeMix : undefined,
-          provider,
+          // Omitted unless overriding: parseGenerateRequest treats an absent provider as "use the
+          // user's saved one", which the backend then records on the job.
+          provider: useMock ? 'mock' : undefined,
           tags: tags.trim() ? tags.split(',').map((t) => t.trim()).filter(Boolean) : undefined,
         },
       });
@@ -146,19 +158,30 @@ export default function GenerateQuizPage() {
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-slate-700">AI provider</label>
-          <select
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
-          >
-            {PROVIDERS.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
+        <div className="space-y-2">
+          {aiConfig && (
+            <p className="text-sm text-slate-600">
+              Using <span className="font-medium">{aiConfig.provider}</span> from your{' '}
+              <Link to="/settings/ai" className="underline hover:text-slate-800">
+                AI settings
+              </Link>
+              .
+            </p>
+          )}
+
+          {aiConfig && aiConfig.provider !== 'mock' && !aiConfig.hasApiKey && !aiConfig.envFallbackEnabled && (
+            <ErrorBanner message="You have not added an API key yet. Add one in AI Settings, or tick the mock option below." />
+          )}
+
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={useMock}
+              onChange={(e) => setUseMock(e.target.checked)}
+              className="focus:outline-none focus:ring-2 focus:ring-slate-500"
+            />
+            Use the mock provider for this quiz (no API calls, no cost)
+          </label>
         </div>
 
         <button

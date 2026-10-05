@@ -5,6 +5,7 @@ import { buildGenerationPlan } from '../services/generation/planner.js';
 import { FAILURE_CATEGORIES } from '../services/generation/failureCategory.js';
 import { GENERATION_STATUS } from '../services/generation/orchestrator.js';
 import { parseGenerateRequest } from '../validation/generateRequest.js';
+import { resolveAiConfig } from '../services/aiConfigService.js';
 
 /**
  * Asynchronous quiz generation.
@@ -50,9 +51,15 @@ export async function create(req, res, next) {
   try {
     const { topic, notes, difficulty, numQuestions, typeMix, provider, tags } = parseGenerateRequest(req.body);
 
-    // Resolve the provider now so an unsupported name is a 400 here rather than a job that fails
-    // seconds later in the worker, where nobody is listening.
-    const resolved = getProvider(provider);
+    // Resolve the provider *and* its credentials now, so an unsupported name, a missing key or a
+    // rejected endpoint is a 400 on this request rather than a job that fails seconds later in the
+    // worker, where nobody is listening and the only evidence is a failure category on a progress
+    // page. Costs one indexed lookup plus the endpoint's DNS pre-flight.
+    const { provider: providerName, runtime } = await resolveAiConfig({
+      userId: req.user.id,
+      requestedProvider: provider,
+    });
+    const resolved = getProvider(providerName, runtime);
     const plan = buildGenerationPlan({ topic, notes, difficulty, numQuestions, typeMix });
 
     const job = await prisma.quizGeneration.create({

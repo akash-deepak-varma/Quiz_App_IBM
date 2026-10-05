@@ -150,3 +150,19 @@ export async function explainMistake({ correctAnswer, userAnswer }) {
       'a personalized explanation of this mistake.',
   };
 }
+
+/**
+ * Every provider method takes the resolved runtime config as a second argument; this provider
+ * ignores it, and that is the whole reason the mock path works with no API key and no network.
+ *
+ * It is a deliberate guarantee rather than an accident of JS tolerating extra arguments:
+ * services/aiConfigService.js short-circuits on 'mock' before it ever touches the database, so a
+ * user with no saved configuration at all can still generate, take and score a quiz.
+ */
+export async function ping() {
+  return {
+    model: null,
+    latencyMs: 0,
+    detail: 'The mock provider makes no network calls and needs no API key.',
+  };
+}

@@ -14,6 +14,7 @@ const ResultsPage = lazy(() => import('./pages/ResultsPage.jsx'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'));
 const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage.jsx'));
 const BadgesPage = lazy(() => import('./pages/BadgesPage.jsx'));
+const AiSettingsPage = lazy(() => import('./pages/AiSettingsPage.jsx'));
 
 function RequireAuth({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -101,6 +102,14 @@ function AppRoutes() {
             element={
               <RequireAuth>
                 <BadgesPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/settings/ai"
+            element={
+              <RequireAuth>
+                <AiSettingsPage />
               </RequireAuth>
             }
           />

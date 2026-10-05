@@ -35,11 +35,12 @@ worked. You do not need to understand the code to run it.
 6. [Environment variables](#environment-variables)
 7. [Database](#database)
 8. [AI providers](#ai-providers)
-9. [Tests](#tests)
-10. [Scripts reference](#scripts-reference)
-11. [Manual setup without the setup script](#manual-setup-without-the-setup-script)
-12. [Project structure](#project-structure)
-13. [Stack](#stack)
+9. [Deploying for a small group](#deploying-for-a-small-group)
+10. [Tests](#tests)
+11. [Scripts reference](#scripts-reference)
+12. [Manual setup without the setup script](#manual-setup-without-the-setup-script)
+13. [Project structure](#project-structure)
+14. [Stack](#stack)
 
 ---
 
@@ -835,11 +836,20 @@ Only the first two need your attention. Everything else has a working default.
 | Variable                           | Purpose                                                        | Default                       |
 | ---------------------------------- | -------------------------------------------------------------- | ----------------------------- |
 | `JWT_SECRET`                       | Signs login tokens. **Must be changed** — the app will not start on the placeholder | placeholder      |
+| `ENCRYPTION_KEY`                   | Encrypts each user's AI API key at rest. **Required** — base64 of exactly 32 bytes | none (app will not start) |
+| `SIGNUP_INVITE_CODE`               | Shared code required to create an account. **Required**        | none (app will not start) |
 | `DATABASE_URL`                     | Where the database is. Its scheme picks the engine             | Postgres URL placeholder      |
 | `PORT`                             | Backend API port                                               | `4000`                        |
-| `AI_PROVIDER`                      | `mock`, `claude` or `openai`                                   | `mock`                        |
+| `AI_PROVIDER`                      | Default provider for a user who has saved none                 | `mock`                        |
+| `AI_ALLOW_ENV_FALLBACK`            | Let a user with no saved config use the `ANTHROPIC_*`/`OPENAI_*` keys below. Local development only | `false` |
+| `AI_ALLOW_INSECURE_ENDPOINTS`      | Allow `http://` and loopback AI endpoints. Refused in production | `false`                     |
+| `CORS_ORIGINS`                     | Comma-separated browser origins allowed to call the API        | `http://localhost:5173`       |
+| `TRUST_PROXY`                      | Set to `1` behind a reverse proxy so `req.ip` is the real client | `0`                         |
+| `JWT_EXPIRES_IN`                   | How long a login token stays valid                             | `7d`                          |
+| `AUTH_RATE_LIMIT`                  | Signup/login attempts per IP per 15 minutes                    | `20`                          |
+| `AI_CONFIG_TEST_RATE_LIMIT`        | "Test connection" attempts per user per 10 minutes             | `10`                          |
 | `QUIZ_GENERATE_RATE_LIMIT`         | Max generation requests per window per user                    | `10`                          |
-| `AI_PROVIDER_TIMEOUT_MS`           | Per-request timeout for a real provider                        | `20000`                       |
+| `AI_PROVIDER_TIMEOUT_MS`           | Per-request timeout for a real provider                        | `60000`                       |
 | `AI_PROVIDER_MAX_RETRIES`          | SDK-level retries for a real provider                          | `2`                           |
 | `AI_GENERATION_CONCURRENCY`        | Question batches generated in parallel                         | `3`                           |
 | `AI_GENERATION_MAX_BATCH_ATTEMPTS` | Retries per batch before giving up on it                       | `3`                           |
@@ -847,10 +857,10 @@ Only the first two need your attention. Everything else has a working default.
 | `GENERATION_WORKER_ENABLED`        | Runs the background generation worker inside the API process   | `true`                        |
 | `GENERATION_WORKER_POLL_MS`        | How often the worker looks for queued jobs                     | `1000`                        |
 | `GENERATION_LEASE_MS`             | How stale a crashed job's claim must be before another worker resumes it | `120000`            |
-| `ANTHROPIC_API_KEY`                | ICA-issued Claude key                                          | unset                         |
+| `ANTHROPIC_API_KEY`                | ICA-issued Claude key. Only used when `AI_ALLOW_ENV_FALLBACK=true` | unset                     |
 | `ANTHROPIC_BASE_URL`               | ICA Claude endpoint                                            | ICA gateway                   |
 | `ANTHROPIC_MODEL`                  | Claude model name                                              | `claude-3-5-sonnet-20241022`  |
-| `OPENAI_API_KEY`                   | ICA-issued GPT key                                             | unset                         |
+| `OPENAI_API_KEY`                   | ICA-issued GPT key. Only used when `AI_ALLOW_ENV_FALLBACK=true` | unset                        |
 | `OPENAI_BASE_URL`                  | ICA OpenAI-compatible endpoint                                 | ICA gateway                   |
 | `OPENAI_MODEL`                     | GPT model name                                                 | `gpt-5.6-terra-dzus`          |
 
@@ -974,6 +984,24 @@ If the folder name under `backend/prisma/sqlite/migrations/` differs from the on
 
 # AI providers
 
+**AI credentials belong to each user, not to the server.** Every signed-in person opens
+**AI Settings** in the nav and saves their own provider, endpoint, model and API key. The key is
+encrypted with AES-256-GCM before it is stored (`backend/src/lib/apiKeyCrypto.js`), is bound to that
+user's id so a row copied between accounts cannot be decrypted, and is **never sent back to the
+browser** — the settings page is told only `hasApiKey: true`. Quiz generation, short-answer grading
+and mistake explanations all use the signed-in user's own configuration.
+
+Two people therefore never share a key unless they deliberately paste the same one, and the person
+who deploys the app does not pay for everyone else's quizzes.
+
+Each user can also tick **"use the mock provider for this quiz"** on the Generate page, which costs
+nothing and needs no key.
+
+The `ANTHROPIC_*` and `OPENAI_*` variables below still exist, but only as a **local development
+convenience**: they are used only when `AI_ALLOW_ENV_FALLBACK=true`, which defaults to `false` and
+must stay `false` on any shared deployment. That flag is the single thing standing between
+"everyone brings their own key" and "everyone spends mine".
+
 ## Mock — the default
 
 The mock provider needs no API key, costs nothing, works offline, and supports every question type
@@ -1006,7 +1034,8 @@ OPENAI_BASE_URL=https://api.nextgen-beta.ica.ibm.com/ica/v1
 OPENAI_MODEL=gpt-5.6-terra-dzus
 ```
 
-Restart the app after changing any of these.
+Restart the app after changing any of these. (Changing a key in **AI Settings** needs no restart --
+that path reads the database on every request.)
 
 Both providers are wired to go through **IBM Consulting Advantage (ICA)** rather than the public
 Anthropic or OpenAI APIs. The integration is implemented and unit-tested, but it has **not** been
@@ -1015,6 +1044,144 @@ Treat the first real call as something to verify rather than assume.
 
 If GPT requests fail, check `OPENAI_BASE_URL` first. An older ICA document showed `.../ica/openai`
 where the current one shows `.../ica/v1`; if `/v1` returns a 404, try the other.
+
+---
+
+# Deploying for a small group
+
+This section covers putting the app online for a handful of people on free tiers. It assumes the
+per-user AI configuration described above, so each person brings their own key.
+
+```
+friends' browser
+   │
+   ├─► Render Static Site            the React build, always warm
+   │                                 VITE_API_BASE_URL baked in at build time
+   └─► Render free Node web service  the API + the in-process generation worker
+          │                          sleeps after ~15 min idle; ~50 s to wake
+          └─► Neon free PostgreSQL   autosuspends when idle
+```
+
+`render.yaml` at the repo root describes both services. Point Render at the repo as a Blueprint, or
+copy the settings into two services by hand.
+
+## Before the first deploy
+
+Generate the two secrets. Keep both somewhere safe:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"   # ENCRYPTION_KEY
+node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))" # JWT_SECRET
+```
+
+**Losing `ENCRYPTION_KEY` makes every saved API key unreadable.** Nothing else breaks — users see
+"Your saved AI key could not be read. Please re-enter it in AI Settings." and paste theirs again —
+but there is no recovery of the old values. Do not use Render's `generateValue: true` for it either:
+that produces a string in Render's own format, and the app refuses to start unless the value decodes
+to exactly 32 bytes.
+
+## Database (Neon)
+
+Neon hands out two connection strings and the difference matters:
+
+| String | Looks like | Used for |
+| ------ | ---------- | -------- |
+| Pooled | `...-pooler.<region>.aws.neon.tech` | `DATABASE_URL` — the running app |
+| Direct | same host **without** `-pooler` | `DIRECT_DATABASE_URL` — migrations only |
+
+Append `?sslmode=require&pgbouncer=true` to the pooled URL. `pgbouncer=true` is not optional:
+without it, Prisma 5 against PgBouncer in transaction mode can throw
+`prepared statement "s0" already exists` under concurrency. Migrations must use the direct URL,
+because Prisma Migrate takes advisory locks and keeps session state, neither of which survives
+transaction pooling.
+
+Apply the schema once from your own machine first, where you can actually read the error output:
+
+```bash
+cd backend
+DATABASE_URL="<direct url>" npm run db:deploy
+```
+
+Then seed the badges — **and only the badges**:
+
+```bash
+DATABASE_URL="<direct url>" npm run seed:badges
+```
+
+This step is easy to skip and fails silently if you do. `Badge` rows are reference data that nothing
+in `src/` ever creates, so on an unseeded database the Badges page is permanently empty and no badge
+is ever awarded, with no error anywhere. Do **not** run the full `npm run seed` against a public
+database: it also creates `demo@example.com` with a password that is hardcoded in the repo.
+
+## Backend service
+
+`render.yaml` already sets these, but if you are configuring by hand:
+
+| Setting | Value |
+| ------- | ----- |
+| Root directory | `backend` |
+| Build command | `npm ci --include=dev && node scripts/prisma.mjs generate && DATABASE_URL="$DIRECT_DATABASE_URL" node scripts/prisma.mjs migrate deploy` |
+| Start command | `npm start` |
+| Health check path | `/api/health` |
+
+`--include=dev` is required: `prisma` is a devDependency and Render sets `NODE_ENV=production`, which
+makes plain `npm ci` skip it — the build would fail with `prisma: not found`. There is no
+`postinstall`, so `prisma generate` has to be explicit.
+
+Environment variables to set, beyond the secrets above: `NODE_ENV=production`, `TRUST_PROXY=1`,
+`CORS_ORIGINS=https://<your-static-site>.onrender.com`, `AI_ALLOW_ENV_FALLBACK=false`,
+`AI_ALLOW_INSECURE_ENDPOINTS=false`.
+
+## Frontend service
+
+| Setting | Value |
+| ------- | ----- |
+| Root directory | `frontend` |
+| Build command | `npm ci --include=dev && npm run build` |
+| Publish directory | `dist` |
+| Environment | `VITE_API_BASE_URL=https://<your-api>.onrender.com/api` |
+
+Three things that will otherwise waste an afternoon:
+
+- `--include=dev` is required here too. `vite`, `@vitejs/plugin-react`, `tailwindcss`, `postcss` and
+  `autoprefixer` are all devDependencies, and Render sets `NODE_ENV=production`, which makes a plain
+  `npm ci` skip them — the build then fails with `vite: not found`. Vite's `build` produces a
+  production bundle regardless of `NODE_ENV`, so this costs nothing.
+- `VITE_API_BASE_URL` is inlined **at build time**. Change it and you must redeploy, not restart. If
+  it is missing at build time the bundle silently falls back to `http://localhost:4000/api`, which
+  looks exactly like a broken API.
+- The router has no server-side routes, so a hard refresh on `/dashboard` or `/settings/ai` 404s
+  without a rewrite rule. `frontend/public/_redirects` and the `routes:` block in `render.yaml` both
+  provide it; keep at least one.
+
+`CORS_ORIGINS` and `VITE_API_BASE_URL` reference each other, so the first deploy is a two-pass
+affair: deploy, note the assigned URLs, set both variables, redeploy.
+
+## Living with the free tier
+
+- **First load after a quiet spell takes up to a minute** while the service wakes. Tell your testers,
+  or they will assume it is broken. Warming it with `curl https://<your-api>.onrender.com/api/health`
+  before a session helps.
+- **Do not add a keep-alive pinger.** Render's free plan allows ~750 instance-hours a month across
+  the account; a service pinged awake consumes essentially all of it.
+- **A generation interrupted by a sleep resumes by itself.** The job keeps its `GENERATING` row; once
+  the service wakes, the worker reclaims it after the lease expires and re-requests only the
+  questions still missing. In practice the progress page polls every 1.5 s, which keeps the service
+  awake for as long as the tab is open.
+- The rate limiters are in-memory, so every deploy and every sleep resets their counters. Fine for
+  five people; they are best-effort, not a guarantee.
+
+## Checking it actually worked
+
+```bash
+curl https://<your-api>.onrender.com/api/health                      # {"status":"ok"}
+curl -H 'Origin: https://evil.example' -i https://<your-api>.../api/health | grep -i allow-origin   # nothing
+```
+
+Then in a browser: hard-refresh `/settings/ai` (should render, not 404), sign up with the invite
+code, save a key and reload the page (the key field must be empty with "a key is saved" beside it),
+and generate one quiz with the mock option ticked. Finally, check the Render logs contain no key
+material and no `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR`.
 
 ---
 
@@ -1078,7 +1245,8 @@ Run from `backend/`.
 | `npm run db:migrate`     | Author a new migration after a schema change             |
 | `npm run db:generate`    | Regenerate the Prisma client                             |
 | `npm run db:sync-sqlite` | Regenerate the SQLite schema from `prisma/schema.prisma` |
-| `npm run seed`           | Seed badge definitions and the demo account/sample quiz  |
+| `npm run seed`           | Seed badge definitions **and** the demo account/sample quiz -- local development only |
+| `npm run seed:badges`    | Seed only the badge definitions. Use this on a public database: badges are reference data nothing else creates, and the full seed would add a demo account with a known password |
 | `npm run lint`           | Check code style                                         |
 
 ## Frontend

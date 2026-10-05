@@ -84,3 +84,23 @@
  * instead of re-sending a request that cannot fit.
  */
 export const REQUIRED_PROVIDER_METHODS = ['generateQuiz', 'gradeShortAnswer', 'gradeCode', 'explainMistake'];
+
+/**
+ * Optional methods, bound by getProvider when a provider exports them.
+ *
+ * `ping(params, runtime)` is a minimal round trip used only by POST /api/me/ai-config/test: it
+ * proves an endpoint, key and model name work together without generating a whole quiz. Kept out of
+ * REQUIRED_PROVIDER_METHODS so that assertImplementsInterface stays satisfied by any provider that
+ * cannot be cheaply probed -- the same reasoning that keeps `capabilities` optional.
+ */
+export const OPTIONAL_PROVIDER_METHODS = ['ping'];
+
+/**
+ * Every method above takes `(params, runtime)`. `runtime` is the resolved per-user AI configuration
+ * built by services/aiConfigService.js -- `{ provider, apiKey, baseUrl, model, timeoutMs,
+ * maxRetries, fetch, source }` -- or null for providers that need no credentials.
+ *
+ * Providers must treat `runtime` as the only source of credentials and model name, and must never
+ * read them from config/env.js: that is what makes two users' calls independent. A provider must
+ * also never log `runtime`, or any part of it other than `model`.
+ */

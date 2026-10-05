@@ -9,7 +9,7 @@ describe('POST /api/auth/signup', () => {
   it('creates an account and returns a token plus a public user with no passwordHash', async () => {
     const res = await request(app)
       .post('/api/auth/signup')
-      .send({ name: 'Ada Lovelace', email: 'ada@example.com', password: 'supersecret' });
+      .send({ name: 'Ada Lovelace', email: 'ada@example.com', password: 'supersecret', inviteCode: 'test-invite-code' });
 
     expect(res.status).toBe(201);
     expect(res.body.token).toBeTypeOf('string');
@@ -18,19 +18,45 @@ describe('POST /api/auth/signup', () => {
   });
 
   it('rejects a missing field with 400', async () => {
-    const res = await request(app).post('/api/auth/signup').send({ email: 'noname@example.com', password: 'supersecret' });
+    const res = await request(app).post('/api/auth/signup').send({ email: 'noname@example.com', password: 'supersecret', inviteCode: 'test-invite-code' });
     expect(res.status).toBe(400);
     expect(res.body.error.message).toBeTypeOf('string');
+  });
+
+  it('rejects a missing invite code with 403', async () => {
+    const res = await request(app)
+      .post('/api/auth/signup')
+      .send({ name: 'Uninvited', email: 'nocode@example.com', password: 'supersecret' });
+
+    expect(res.status).toBe(403);
+    // No account may be created by a caller who could not produce the code.
+    expect(res.body.user).toBeUndefined();
+    expect(res.body.token).toBeUndefined();
+  });
+
+  it('rejects a wrong invite code with 403 and the same message as a missing one', async () => {
+    const missing = await request(app)
+      .post('/api/auth/signup')
+      .send({ name: 'Uninvited', email: 'a@example.com', password: 'supersecret' });
+
+    const wrong = await request(app)
+      .post('/api/auth/signup')
+      .send({ name: 'Uninvited', email: 'b@example.com', password: 'supersecret', inviteCode: 'nope' });
+
+    expect(wrong.status).toBe(403);
+    // Identical copy for both: telling the caller which of the two it was helps only someone who
+    // does not already have the code.
+    expect(wrong.body.error.message).toBe(missing.body.error.message);
   });
 
   it('rejects a duplicate email with 400', async () => {
     await request(app)
       .post('/api/auth/signup')
-      .send({ name: 'Ada', email: 'dupe@example.com', password: 'supersecret' });
+      .send({ name: 'Ada', email: 'dupe@example.com', password: 'supersecret', inviteCode: 'test-invite-code' });
 
     const res = await request(app)
       .post('/api/auth/signup')
-      .send({ name: 'Someone Else', email: 'dupe@example.com', password: 'supersecret' });
+      .send({ name: 'Someone Else', email: 'dupe@example.com', password: 'supersecret', inviteCode: 'test-invite-code' });
 
     expect(res.status).toBe(400);
   });
@@ -41,7 +67,7 @@ describe('POST /api/auth/login', () => {
     await resetDb();
     await request(app)
       .post('/api/auth/signup')
-      .send({ name: 'Grace Hopper', email: 'grace@example.com', password: 'supersecret' });
+      .send({ name: 'Grace Hopper', email: 'grace@example.com', password: 'supersecret', inviteCode: 'test-invite-code' });
   });
 
   it('logs in with the right password', async () => {
@@ -72,7 +98,7 @@ describe('GET /api/auth/me', () => {
   it('returns the current user for a valid token', async () => {
     const signupRes = await request(app)
       .post('/api/auth/signup')
-      .send({ name: 'Margaret Hamilton', email: 'margaret@example.com', password: 'supersecret' });
+      .send({ name: 'Margaret Hamilton', email: 'margaret@example.com', password: 'supersecret', inviteCode: 'test-invite-code' });
 
     const res = await request(app)
       .get('/api/auth/me')

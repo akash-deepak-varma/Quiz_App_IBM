@@ -2,13 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import { app } from '../src/app.js';
 import { resetDb } from './setup/resetDb.js';
-
-async function signup(email) {
-  const res = await request(app)
-    .post('/api/auth/signup')
-    .send({ name: 'Test User', email, password: 'supersecret' });
-  return res.body.token;
-}
+import { signupUser as signup } from './setup/signup.js';
 
 async function generateAndSubmit(token, { correct }) {
   const generateRes = await request(app)

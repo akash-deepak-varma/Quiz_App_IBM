@@ -5,6 +5,7 @@ import { logJobSummary } from '../../lib/generationLog.js';
 import { fromJsonOrNull } from '../../lib/serialization.js';
 import { getProvider } from '../../providers/index.js';
 import { materializeQuiz } from '../quizMaterializationService.js';
+import { resolveAiConfig } from '../aiConfigService.js';
 import { classifyError, FAILURE_CATEGORIES } from './failureCategory.js';
 import { GENERATION_STATUS, orderByTypeMix, runGeneration } from './orchestrator.js';
 import { buildGenerationPlan, planBatches } from './planner.js';
@@ -35,11 +36,9 @@ const WORKER_ID = `${os.hostname()}:${process.pid}`;
 // (one second later) picks up from the new oldest.
 const CLAIM_CANDIDATES = 5;
 
-function modelNameFor(provider) {
-  if (provider === 'claude') return env.anthropic.model;
-  if (provider === 'openai') return env.openai.model;
-  return null;
-}
+// `modelNameFor(provider)` used to live here, reading env.anthropic.model / env.openai.model. It is
+// gone because the model is now a property of the user's own configuration, not the server's: the
+// resolved runtime carries it, and getProvider exposes it as `provider.modelName`.
 
 /**
  * Take ownership of the oldest job that needs work.
@@ -173,7 +172,24 @@ function outstandingCounts(planned, staged) {
  */
 async function generateOutstanding(job) {
   const request = requestFromJob(job);
-  const provider = getProvider(job.provider);
+
+  // Credentials are live-loaded from the job's owner, not snapshotted onto the job row at enqueue.
+  //
+  // This is the decisive case: claimNextJob's third branch exists so an abandoned job is picked up
+  // after its lease expires -- potentially hours later, after a host restart. A snapshot taken at
+  // enqueue can be arbitrarily stale by then, and invisibly so. A live load is always current, so
+  // a user who fixes a wrong model name or rotates a revoked key makes the resumed job work; and a
+  // user who *deletes* their config stops queued work from spending those credentials at all.
+  //
+  // What is snapshotted is the *decision*: `job.provider` was resolved at enqueue and is honoured
+  // exactly. If the user has since switched their saved provider away from it, this throws
+  // MissingAiConfigError and the job fails with AI_CONFIG_MISSING, rather than silently generating
+  // from a different model family and writing a providerUsed that is a lie.
+  const { provider: providerName, runtime } = await resolveAiConfig({
+    userId: job.userId,
+    requestedProvider: job.provider,
+  });
+  const provider = getProvider(providerName, runtime);
   const fullPlan = buildGenerationPlan(request);
   const staged = await loadStagedQuestions(job.id);
   const resuming = staged.length > 0;
@@ -184,7 +200,10 @@ async function generateOutstanding(job) {
       data: {
         planJson: JSON.stringify(fullPlan),
         contextMode: fullPlan.contextMode,
-        model: modelNameFor(job.provider),
+        // Only written on the first run (`!job.planJson`), so a resumed job keeps the first run's
+        // model name even if the user changed it in between. Cosmetic: it is forensic telemetry,
+        // not an input to anything.
+        model: provider.modelName,
       },
     });
   }
