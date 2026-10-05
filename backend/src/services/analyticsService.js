@@ -1,7 +1,7 @@
 import { prisma } from '../lib/prismaClient.js';
 
-const DEFAULT_HARDEST_LIMIT = 10;
-const DEFAULT_REVIEW_LIMIT = 20;
+const DEFAULT_HARDEST_LIMIT = 100;
+const DEFAULT_REVIEW_LIMIT = 200;
 const MIN_TIMES_ANSWERED = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DUE_IN_DAYS = 30;

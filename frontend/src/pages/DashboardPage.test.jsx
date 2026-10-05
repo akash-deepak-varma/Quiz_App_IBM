@@ -55,23 +55,63 @@ describe('DashboardPage analytics sections', () => {
     apiFetch.mockReset();
   });
 
-  it('renders hardest questions and the review queue', async () => {
+  it('renders hardest questions and the review queue, one tab at a time', async () => {
     mockDashboardFetches();
+    const user = userEvent.setup();
 
     renderPage();
 
     expect(await screen.findByText(/What is a closure\?/)).toBeInTheDocument();
-    expect(screen.getByText(/What is hoisting\?/)).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Retake this quiz' })).toHaveLength(2);
+    expect(screen.queryByText(/What is hoisting\?/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Retake this quiz' })).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: /Due for review/ }));
+
+    expect(await screen.findByText(/What is hoisting\?/)).toBeInTheDocument();
+    expect(screen.queryByText(/What is a closure\?/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Retake this quiz' })).toHaveLength(1);
+  });
+
+  it('paginates through more than a page of results instead of showing them all at once', async () => {
+    const manyReview = {
+      questions: Array.from({ length: 12 }, (_, i) => ({
+        questionId: `r${i + 1}`,
+        prompt: `Question number ${i + 1}`,
+        topic: 'JavaScript',
+        quizId: `quiz${i + 1}`,
+      })),
+    };
+    mockDashboardFetches({ review: manyReview });
+    const user = userEvent.setup();
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /Due for review/ }));
+
+    expect(await screen.findByText('Question number 1')).toBeInTheDocument();
+    expect(screen.queryByText('Question number 11')).not.toBeInTheDocument();
+    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('Question number 11')).toBeInTheDocument();
+    expect(screen.queryByText('Question number 1')).not.toBeInTheDocument();
+    expect(screen.getByText('Page 2 of 2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
   it('shows placeholder copy when there is nothing to review', async () => {
     mockDashboardFetches({ hardest: { questions: [] }, review: { questions: [] } });
+    const user = userEvent.setup();
 
     renderPage();
 
     await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/analytics/review-queue'));
-    expect(screen.getAllByText('Nothing here right now.')).toHaveLength(2);
+    expect(screen.getByText('Nothing here right now.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Due for review/ }));
+
+    expect(await screen.findByText('Nothing here right now.')).toBeInTheDocument();
   });
 
   it('navigates to the runner with the refetched quiz when retaking a hard question', async () => {

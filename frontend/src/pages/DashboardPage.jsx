@@ -8,6 +8,8 @@ import AttemptResultsList from '../components/AttemptResultsList.jsx';
 import MathText from '../components/MathText.jsx';
 import { LoadingIndicator, PageError, ErrorBanner } from '../components/AsyncState.jsx';
 
+const PAGE_SIZE = 10;
+
 // Every question here has already been answered at least once, so its quiz always has at
 // least one attempt -- the exact count doesn't matter, only that it's non-zero (hides the
 // edit/regenerate affordance on the runner).
@@ -36,6 +38,44 @@ function RetakeQuestionList({ questions, navigate, onError }) {
   );
 }
 
+// Pages through PAGE_SIZE questions at a time, so a long list (the backend caps these at
+// 100-200) doesn't push the rest of the dashboard far down the page or force scrolling
+// within a cramped box to find an item further down.
+function AttentionList({ questions, navigate, onError }) {
+  const [page, setPage] = useState(0);
+  const totalPages = Math.ceil(questions.length / PAGE_SIZE);
+  const visible = questions.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  return (
+    <div>
+      <RetakeQuestionList questions={visible} navigate={navigate} onError={onError} />
+      {totalPages > 1 && (
+        <div className="mt-3 flex items-center justify-between text-xs">
+          <button
+            type="button"
+            onClick={() => setPage((p) => p - 1)}
+            disabled={page === 0}
+            className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Previous
+          </button>
+          <span className="text-slate-400">
+            Page {page + 1} of {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={page === totalPages - 1}
+            className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatCard({ label, value }) {
   return (
     <div className="rounded-lg bg-white p-4 text-center shadow">
@@ -59,6 +99,7 @@ export default function DashboardPage() {
   const [reviewQueue, setReviewQueue] = useState(null);
   const [error, setError] = useState(null);
   const [retakeError, setRetakeError] = useState(null);
+  const [activeTab, setActiveTab] = useState('hardest');
   const [selectedAttemptId, setSelectedAttemptId] = useState(null);
   const [selectedAttempt, setSelectedAttempt] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -140,15 +181,33 @@ export default function DashboardPage() {
 
       {retakeError && <ErrorBanner message={retakeError} />}
 
-      <div className="grid gap-6 sm:grid-cols-2">
-        <div className="rounded-lg bg-white p-4 shadow">
-          <h2 className="mb-2 text-sm font-semibold text-slate-700">Questions you get wrong most</h2>
-          <RetakeQuestionList questions={hardestQuestions} navigate={navigate} onError={setRetakeError} />
+      <div className="rounded-lg bg-white p-4 shadow">
+        <div className="mb-3 flex gap-4 border-b border-slate-100">
+          <button
+            type="button"
+            onClick={() => setActiveTab('hardest')}
+            className={`-mb-px border-b-2 pb-2 text-sm font-semibold ${
+              activeTab === 'hardest' ? 'border-indigo-500 text-slate-800' : 'border-transparent text-slate-400'
+            }`}
+          >
+            Wrong most ({hardestQuestions.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('review')}
+            className={`-mb-px border-b-2 pb-2 text-sm font-semibold ${
+              activeTab === 'review' ? 'border-indigo-500 text-slate-800' : 'border-transparent text-slate-400'
+            }`}
+          >
+            Due for review ({reviewQueue.length})
+          </button>
         </div>
-        <div className="rounded-lg bg-white p-4 shadow">
-          <h2 className="mb-2 text-sm font-semibold text-slate-700">Due for review</h2>
-          <RetakeQuestionList questions={reviewQueue} navigate={navigate} onError={setRetakeError} />
-        </div>
+        <AttentionList
+          key={activeTab}
+          questions={activeTab === 'hardest' ? hardestQuestions : reviewQueue}
+          navigate={navigate}
+          onError={setRetakeError}
+        />
       </div>
 
       <div className="rounded-lg bg-white p-4 shadow">
